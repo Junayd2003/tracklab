@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+backend/.venv/
+
+# Environment / secrets
+.env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded/analysed audio — never commit audio files
+data/
+
+# ML artefacts — trained models are regenerated, not versioned in git
+backend/ml/models/*.pkl
+backend/ml/models/*.joblib
+
+# Frontend (added in Stage 10)
+frontend/node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
+.vscode/
