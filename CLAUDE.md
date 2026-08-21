@@ -120,7 +120,7 @@ is what makes context survive between sessions.
 ## Technical constraints
 
 - macOS. Development happens on my MacBook only.
-- Python 3.12, virtual environment at `backend/.venv`.
+- Python 3.13, virtual environment at `backend/.venv`.
 - Backend: FastAPI, SQLAlchemy, SQLite.
 - Audio: librosa, soundfile, numpy, scipy. ffmpeg is a system
   dependency for MP3 and M4A.
