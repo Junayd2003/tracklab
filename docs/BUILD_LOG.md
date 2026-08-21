@@ -125,3 +125,95 @@ Copy this shape exactly for each new entry.
 **Next session starts with**
 - Stage 2: `backend/audio/loader.py` — format loading, resampling to
   44.1kHz, lossy-format flagging, SHA-256 hashing.
+
+---
+
+## Session 2 — 2026-08-21 — Stage 2: Audio loading and format handling
+
+**Done**
+- `backend/audio/loader.py` built: SHA-256 hashing (streamed in 1MB
+  chunks), extension-based format detection with lossy/lossless
+  classification, `load_audio()` resampling any supported file to
+  44.1kHz and returning mono + stereo arrays via a `LoadedAudio`
+  dataclass
+- Test tracks copied into `data/samples/` (gitignored): two personal
+  MP3s plus one WAV that is the same track as one of the MP3s, found by
+  scanning the FL Studio Projects folder by file content (`file`
+  command), not just by extension, after I asked to check for
+  mislabeled WAVs
+- `tests/test_loader.py` written: 16 pytest tests against synthetic
+  sine-wave fixtures generated at test time (not personal audio), all
+  passing
+- `pytest` installed and pinned in `requirements.txt`
+- `.gitignore` updated to exclude `.pytest_cache/`
+- Manually verified against real tracks: `PS Cmin 160.mp3` and
+  `PS Cmin 160 24.wav` (same track) both load at sample_rate 44100,
+  durations 204.07s vs 204.02s (consistent to ~50ms), hash is
+  deterministic across repeated calls on the same file
+- `CLAUDE.md` corrected: vault path was `~/OneDrive/SecondBrain/...`,
+  which doesn't exist on this machine — actual mount is
+  `~/Library/CloudStorage/OneDrive-Personal/SecondBrain/...`
+- `CLAUDE.md` session protocol extended with understanding checkpoints
+  (retrieval practice at session start, "why" questions after each
+  chunk, my own concept attempt logged alongside the polished one) —
+  see `CLAUDE.md` for the reasoning
+
+**Files touched**
+- `backend/audio/loader.py` — hashing, format detection, resampling,
+  mono/stereo loading
+- `tests/test_loader.py` — pytest suite on synthetic fixtures
+- `requirements.txt` — added `pytest==9.1.1`
+- `.gitignore` — added `.pytest_cache/`
+- `CLAUDE.md` — vault path corrected, session protocol extended
+- `data/samples/` — three personal test tracks (gitignored, not
+  committed): two MP3s, one WAV
+
+**Decisions**
+- Lossy/lossless format mapping as module-level constants in
+  `loader.py`, not a separate config file (also logged to vault
+  `decisions.md`)
+- `LoadedAudio` as a `@dataclass`, not a dict (also logged to vault
+  `decisions.md`)
+- Decode audio once as stereo, derive mono by averaging channels rather
+  than decoding twice — ties `mono` to being the literal channel sum
+  Stage 4's phase-cancellation analysis needs (also logged to vault
+  `decisions.md`)
+- Test fixtures are synthetic sine waves generated at test time, not
+  personal audio referenced by path or committed as binary fixtures
+  (also logged to vault `decisions.md`)
+
+**Concepts explained**
+- Streaming SHA-256 hashing vs loading a whole file into memory (also
+  logged to vault `learning.md`)
+- Resampling as interpolation plus anti-aliasing filtering, not just
+  relabeling — flagged for me to verify which resampler librosa
+  actually uses myself, not covered in full (also logged to vault
+  `learning.md`)
+- MP3 encoder priming/padding (LAME) as the cause of the ~50ms duration
+  mismatch between the MP3 and WAV of the same track (also logged to
+  vault `learning.md`)
+- `@dataclass` vs a plain dict for structured return values (also
+  logged to vault `learning.md`)
+- pytest fixtures, `tmp_path`, `parametrize`, and why synthetic test
+  data over personal files (also logged to vault `learning.md`)
+
+**In progress / not finished**
+- M4A untested: no M4A files found in the FL Studio Projects folder.
+  WAV and MP3 both verified against real tracks; M4A verification
+  deferred until a file is available
+- Nothing staged or committed to git yet this session
+
+**Open questions**
+- The vault's own `BUILD_LOG.md` (a leftover copy from before Session
+  1) has not been updated since Session 0 and is now stale, since
+  `BUILD_LOG.md` per `CLAUDE.md`'s "Where things live" belongs only in
+  the repo. Delete it, or leave it as a historical snapshot?
+- Ready to commit Stage 2's work, or hold until M4A is verified?
+
+**Exit criteria met?**
+- Partially — WAV and MP3 consistency verified on real tracks; M4A
+  untested
+
+**Next session starts with**
+- Either verify an M4A file once available, or move to Stage 3 core
+  feature extraction with M4A verification logged as a known gap.

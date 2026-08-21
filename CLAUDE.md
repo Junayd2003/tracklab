@@ -62,7 +62,7 @@ repo I cannot read.
 ## Where things live
 
 ```
-~/OneDrive/SecondBrain/              ← Obsidian vault, second brain
+~/Library/CloudStorage/OneDrive-Personal/SecondBrain/   ← Obsidian vault
 └── 01 - Projects/Music Production Project/
     ├── spec.md                      ← full feature spec, source of truth
     ├── decisions.md                 ← architecture decisions and why
@@ -85,19 +85,45 @@ current.
 
 ## Session protocol
 
+Writing something down proves it was explained. It does not prove I
+retained it. The checkpoints below exist to close that gap using active
+recall — being asked to produce an answer, not just recognise one —
+because that is what actually builds durable, interview-ready
+understanding. A log full of polished explanations I nodded along to is
+comfortable and nearly useless under real questioning. A log that also
+shows my own first-attempt words, wrong ones included, is a more honest
+record of what I can actually defend.
+
 **At the start of a session**
 
-1. Read `docs/BUILD_LOG.md`. The last entry tells you what was
+1. Before reading anything, ask me to explain one or two things from
+   the previous session cold, without looking at the log. This is
+   spaced retrieval: whatever survives a week without notes is what
+   survives an interview. Whatever I cannot reconstruct gets a short
+   re-explanation before we continue.
+2. Read `docs/BUILD_LOG.md`. The last entry tells you what was
    completed, what is in progress, and any open questions.
-2. Read the relevant stage in `docs/STAGES.md`.
-3. Tell me in two or three sentences where we are and what you propose
+3. Read the relevant stage in `docs/STAGES.md`.
+4. Tell me in two or three sentences where we are and what you propose
    to do this session. Wait for my confirmation before writing code.
 
 **During a session**
 
 - Small increments, explanation after each, wait for me.
+- After explaining a chunk, before moving to the next one, ask me one
+  or two targeted "why" questions about it — not "does this make
+  sense?", something that requires me to reconstruct the reasoning
+  (e.g. "why does mono get derived from stereo rather than decoded
+  separately, here?"). I answer in my own words, right or wrong.
+  Getting it wrong or freezing is the real signal to re-explain, more
+  informative than me nodding along to a page of prose.
 - If I ask a conceptual question mid-build, answer it properly. That is
   not a distraction from the work, it is the work.
+- Flag, in the moment, any implementation-level choice you made
+  unilaterally within an approach I already agreed to (not a fresh
+  architectural fork — those already get surfaced as a choice). These
+  are the details I'm least likely to be able to defend later, because
+  nobody asked me about them.
 
 **At the end of a session**
 
@@ -106,10 +132,14 @@ When I say we are stopping, do all of the following:
 1. Append a new entry to `docs/BUILD_LOG.md` in the format defined at
    the top of that file.
 2. If any architectural decision was made, append it to
-   `~/OneDrive/SecondBrain/01 - Projects/Music Production Project/decisions.md`
+   `~/Library/CloudStorage/OneDrive-Personal/SecondBrain/01 - Projects/Music Production Project/decisions.md`
    with the reasoning and the alternatives rejected.
-3. If you explained a concept I had not met before, append a short note
-   to `~/OneDrive/SecondBrain/01 - Projects/Music Production Project/learning.md`.
+3. For each concept explained this session: ask me to state its
+   one-line purpose myself first, unprompted. Write my attempt into
+   `~/Library/CloudStorage/OneDrive-Personal/SecondBrain/01 - Projects/Music Production Project/learning.md`
+   alongside the polished version, so the file shows what I already
+   owned versus what needed help, not a uniform summary that hides the
+   gap.
 4. Tell me in one line what the next session should start with.
 
 The vault is on OneDrive and syncs across my machines, so writing to it
