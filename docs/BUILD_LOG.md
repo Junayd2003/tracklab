@@ -114,11 +114,9 @@ Copy this shape exactly for each new entry.
 - Nothing mid-built. Stage 1 is complete.
 
 **Open questions**
-- Git has no global `user.name`/`user.email` configured, so commits
-  are attributed to an auto-generated `junaydsmac@Mac.lan` identity.
-  Worth setting explicitly before this goes any further.
-- Default branch is `master`, not `main`. Harmless, but easier to
-  rename now than later.
+- Resolved same session: global git identity set to
+  `Junayd Ismail <junayd.i@hotmail.com>`, existing commits rewritten
+  via `git rebase --root --exec`, branch renamed `master` → `main`.
 
 **Exit criteria met?**
 - Yes. `python -c "import librosa, fastapi, sqlalchemy"` runs clean in
