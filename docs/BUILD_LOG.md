@@ -217,3 +217,104 @@ Copy this shape exactly for each new entry.
 **Next session starts with**
 - Either verify an M4A file once available, or move to Stage 3 core
   feature extraction with M4A verification logged as a known gap.
+
+---
+
+## Session 3 — 2026-08-22 — Project re-scope: Tier 1 narrowed to 8 stages
+
+**Done**
+- Received and evaluated an external critique of the project's scope
+  and positioning: the ML component judged weak and expensive relative
+  to what it would cost; the mathematics judged undersold by the
+  original "libraries used freely, this is a product not a study of
+  numerical methods" framing; the 28 September target flagged as
+  colliding directly with final year and a stacked postgraduate
+  application pipeline
+- Rescoped Tier 1: cut genre/mood classification and the Claude
+  feedback layer, both moved to Tier 2, built only after a hard freeze
+  on 2026-09-28 (tag `v1.0`)
+- Fourteen stages collapsed to eight (`docs/STAGES.md` rewritten):
+  repo + CI, loading, Welch-from-scratch, LUFS-from-scratch,
+  mono/phase-from-scratch, librosa features + database, FastAPI +
+  integration tests, minimal dashboard + README + freeze
+- Adopted ground-truth-validatability as the explicit criterion for
+  what gets implemented from scratch versus called via a library:
+  Welch, LUFS, and mono/phase have independently checkable ground
+  truth (`scipy.signal.welch`; `pyloudnorm` + ffmpeg's `ebur128` to
+  within 0.1 LU; synthetic signals with a known injected phase
+  inversion); BPM and key detection do not, and stay as `librosa`
+  calls
+- `CLAUDE.md` updated: intro rewritten to match the narrower Tier 1,
+  new "What gets implemented from scratch" table added, "Scope
+  discipline" rewritten with 28 September framed as a hard stop rather
+  than a soft target, with explicit guidance to protect Stage 4's
+  validation rigour over Stage 8's dashboard polish if the calendar
+  tightens
+- Vault `spec.md` updated: Tier 1/Tier 2 feature lists rewritten to
+  match, data model annotated to show which tables are Tier 1 versus
+  deferred to Tier 2
+- Vault `decisions.md`: three entries logging the rescoping reasoning
+  in full
+- `docs/CONCEPTS.md`'s forward-looking note updated to reference the
+  new Stage 3–5 content (Welch, LUFS, mono/phase) instead of the old,
+  now-superseded "core feature extraction" framing
+
+**Files touched**
+- `docs/STAGES.md` — rewritten: 8 stages replacing 14
+- `CLAUDE.md` — intro, technical constraints, new from-scratch table,
+  scope discipline rewritten
+- `docs/CONCEPTS.md` — "What's next" section updated
+- (vault) `spec.md` — Tier 1/2 rewritten, data model annotated
+- (vault) `decisions.md` — three new entries, 2026-08-22
+
+**Decisions**
+- See vault `decisions.md`, three entries dated 2026-08-22: Tier 1
+  rescoped and narrowed to 8 stages; ground-truth-validatability
+  adopted as the from-scratch criterion; CI pulled forward to Stage 1
+
+**Concepts explained**
+- None new this session — a planning/re-scope session, not a build
+  session
+
+**In progress / not finished**
+- No GitHub remote exists yet for tracklab; Stage 1's revised exit
+  criteria (CI green on push) can't be met until one is created — a
+  deliberate separate step, not done as part of this session
+- The from-scratch DSP itself (Stages 3–5) not started
+
+**Open questions**
+- None blocking. Ready to either set up the GitHub remote and get CI
+  green (closing the gap in Stage 1's revised exit criteria), or move
+  straight to Stage 3 and treat CI as a fast-follow
+
+**Exit criteria met?**
+- N/A — planning session, no stage exit criteria targeted
+
+**Next session starts with**
+- Either: create the GitHub remote and get CI green (closing the gap
+  in Stage 1's revised exit criteria), or start Stage 3: Welch
+  spectral estimation from scratch, validated against
+  `scipy.signal.welch`.
+
+**Addendum, 2026-08-23** — a day after this session, a small addition
+was made on top of the rescope above, before it was committed: Stage 7
+gained a shared-secret API key gate (`.env`, checked on every route,
+required from the frontend and CLI). Reasoning: the app binds to
+`0.0.0.0` so it's reachable from my phone over wifi, which also means
+anyone else on that network can reach it — a proportionate gate for a
+single-user, LAN-exposed tool, not full multi-user auth. `STAGES.md`
+(Stage 7) and `CLAUDE.md` (technical constraints) both reflect this;
+vault `spec.md`/`decisions.md` were updated the same day. A Docker
+suggestion and an SMTP-based abuse-alerting idea were also raised and
+deliberately not adopted in the same window — Docker because the
+project runs on one machine with no deployment target, so venv+CI
+already covers the reproducibility need; SMTP alerting because it's a
+heavier feature than the shared-secret gate warrants before there's
+even a published app to abuse. Also decided in this window, then
+reversed: a request to sync the repo itself via OneDrive for
+cross-device (Mac + Windows) access — rejected, since OneDrive's
+continuous file-sync is a known corruption risk against git's `.git`
+directory, and the venvs contain macOS-specific compiled binaries that
+wouldn't run on Windows regardless. The correct mechanism (a GitHub
+remote, already needed for CI) was proposed but the user chose to
+leave it for now rather than set it up immediately.

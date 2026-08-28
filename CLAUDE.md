@@ -14,10 +14,15 @@ not know whether a mix will hold up on phone speakers, laptop speakers,
 or a club system. This tool tells me, using measured numbers rather
 than guesswork.
 
-It ingests an audio file, extracts acoustic features, classifies genre
-and mood with a trained model, and generates written production
-feedback grounded in those numbers via the Claude API. Results are
-stored locally and displayed in a dashboard.
+It ingests an audio file and measures it: loudness (LUFS), mono
+compatibility and phase cancellation, frequency balance, BPM, and key.
+Results are stored locally and displayed in a minimal dashboard.
+
+Genre/mood classification and Claude-generated written feedback are
+deliberately not part of the first build — see "What gets implemented
+from scratch" and "Scope discipline" below. They return afterwards, as
+considered additions to a working system, not as headline features
+competing with it for the five weeks before term starts.
 
 It runs entirely on my machine. No cloud hosting, no paid
 infrastructure.
@@ -154,34 +159,76 @@ is what makes context survive between sessions.
 - Backend: FastAPI, SQLAlchemy, SQLite.
 - Audio: librosa, soundfile, numpy, scipy. ffmpeg is a system
   dependency for MP3 and M4A.
-- ML: scikit-learn. Genre classifier trained on FMA, not GTZAN, because
-  GTZAN has no electronic subgenres and I make electronic music.
+- CI: GitHub Actions runs the test suite on every push, pulled forward
+  to Stage 1 — see `docs/STAGES.md`.
 - Frontend: React with Vite, recharts for plots.
-- Claude API via the `anthropic` Python SDK, called from the backend
-  only. The API key lives in `.env` and `.env` is gitignored. Never
-  hardcode it, never put it in frontend code.
 - Analysis runs as a background task, not in the request cycle. A five
   minute track takes 10 to 30 seconds to analyse.
 - Audio files are not stored in the database. Store a path, a hash, and
   the extracted features.
 - Files are hashed on upload so re-uploading the same file returns the
   cached analysis.
+- The app binds to `0.0.0.0` so it's reachable from my phone on the
+  same wifi — which also means anyone else on that network can reach
+  it. Stage 7 adds a shared-secret API key in `.env`, checked on every
+  route, for both the frontend and CLI/`curl` access. This is a
+  proportionate gate for a single-user, LAN-exposed tool, not user
+  accounts — don't over-build it into real multi-user auth.
 
-Unlike my `pyode` project, here I use libraries freely. This is a
-product, not a study of numerical methods. Use librosa rather than
-writing an FFT.
+Genre/mood classification (scikit-learn, trained on FMA) and the Claude
+feedback layer (via the `anthropic` Python SDK) are Tier 2, deferred
+until after the Tier 1 freeze. See "Scope discipline". When they are
+built: the API key lives in `.env`, gitignored, never hardcoded, never
+put in frontend code.
+
+---
+
+## What gets implemented from scratch
+
+Not everything gets to use a library. The line isn't "maths versus
+product" — that was the original framing here, and it was wrong,
+because it threw away the thing that actually differentiates this
+project. The real line is **whether there is ground truth to validate
+an implementation against.** Where there is, hand-rolling it and
+proving numerical agreement with a reference is a stronger, more
+specific claim than calling a library. Where there isn't, calling a
+library and being able to say *why* is the better answer than
+pretending a reimplementation could be validated when it can't.
+
+| Component | Built | Why |
+|---|---|---|
+| Welch power spectral density | From scratch — `backend/audio/spectral.py` | Validated against `scipy.signal.welch` on synthetic signals of known spectral content. Agreement is a pass/fail test. |
+| LUFS loudness (ITU-R BS.1770) | From scratch — `backend/audio/loudness.py` | A published standard: K-weighting filter chain, two-stage gating. Validated against `pyloudnorm` and ffmpeg's `ebur128`, target agreement within 0.1 LU. |
+| Mono compatibility / phase cancellation | From scratch — `backend/audio/mono_compat.py` | Validated by injecting a known out-of-phase component into a synthetic signal and checking the analysis detects it at the correct frequency and magnitude — constructed ground truth. |
+| BPM / beat tracking | `librosa` | No firm ground truth: beat tracking is fuzzy even for a human listener on syncopated or tempo-varying material. A large implementation effort for a validation claim I couldn't honestly make. |
+| Key / mode detection | `librosa`, chroma-based | Same reasoning as BPM — kept as a library call, not reimplemented. |
+
+Do not substitute a library call for one of the first three rows
+without flagging it as a scope change first. Do not spend a session
+attempting to hand-roll BPM or key detection — that effort belongs to
+the DSP that can actually be validated.
 
 ---
 
 ## Scope discipline
 
-The feature tiers are in `spec.md`. Tier 1 is the deliverable. Tier 2
-comes after Tier 1 works end to end. Tier 3 is stretch, including the
-real-time VB-Cable monitor.
+The feature tiers are in `spec.md`. Tier 1 is narrower than the
+original plan: the DSP analysis layer above, the database, a minimal
+dashboard, tests, and CI. No genre/mood classification, no Claude
+feedback layer, in the first cut — both moved to Tier 2. See the
+vault's `decisions.md` (2026-08-22) for the full reasoning.
 
 Do not suggest features outside the current tier. Do not expand scope
 mid-stage. If something seems like it belongs in a later tier, note it
 in the build log and move on.
 
-I am back at university on 28 September. The realistic target is Tier 1
-complete and demonstrable by then.
+**28 September is a hard stop, not a soft target.** Term starts, and
+every probability in the postgraduate application plan is conditioned
+on a First — tracklab does not get to cost that. Freeze the repository
+that day regardless of what remains unbuilt, tag `v1.0`, and stop.
+Eight stages (`docs/STAGES.md`) are scoped to fit in the five weeks
+before then. If the calendar tightens, cut into Stage 8's dashboard
+polish before cutting into Stage 4's validation rigour — the LUFS
+implementation validated to within 0.1 LU against two independent
+references is the strongest single artefact in the repository, and is
+worth protecting over a nicer chart.

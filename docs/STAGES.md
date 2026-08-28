@@ -1,36 +1,56 @@
 # STAGES.md — tracklab build plan
 
-Fourteen stages. One stage per session, roughly two to four hours each.
-Some stages will take two sessions; that is fine and expected.
+Eight stages, roughly two to four hours each. Some stages will take two
+sessions — Stage 4 especially, see the note there — and that is fine
+and expected.
 
 Do not begin a stage until the previous stage's exit criteria are met.
 The exit criteria exist so that we never build on top of something
 broken.
+
+**This plan was narrowed from an original fourteen stages on
+2026-08-22.** Genre/mood classification and the Claude feedback layer
+were cut from Tier 1 and moved to Tier 2, built only after Tier 1 is
+frozen. See `CLAUDE.md`'s "What gets implemented from scratch" section
+and the vault's `decisions.md` for the full reasoning. The throughline:
+implement a DSP component from scratch where there is ground truth to
+validate it against (Welch spectral estimation, LUFS loudness,
+mono/phase compatibility); call a library where there isn't (BPM, key).
 
 Each stage lists: what it produces, what I need to understand before
 moving on, and how we know it works.
 
 ---
 
-## Phase A — Backend foundation (Stages 1–5)
-
-### Stage 1 — Repo skeleton and environment
+### Stage 1 — Repo, environment, and CI
 
 **Produces**
-- Directory structure, `.gitignore`, `README.md` stub
-- `backend/.venv` with dependencies installed
-- `requirements.txt` pinned
-- `git init` and first commit
-- ffmpeg verified present on the system
+- Directory structure, `.gitignore`, `README.md` stub *(done)*
+- `backend/.venv` with dependencies installed, `requirements.txt`
+  pinned *(done)*
+- `git init` and first commits, ffmpeg verified *(done)*
+- `pytest` installed and in use *(done, in practice landed during
+  Stage 2's work rather than here — the two are close enough in
+  spirit that it doesn't need re-doing)*
+- GitHub Actions workflow running the test suite on every push, with a
+  status badge in `README.md` *(not yet done — needs a GitHub remote
+  for tracklab, which doesn't exist yet)*
 
 **I must understand**
 - What a virtual environment actually isolates and why it matters
 - Why we pin versions in `requirements.txt`
 - What is in `.gitignore` and why each entry is there
+- What CI actually does: runs the test suite in a clean container on
+  every push, catching a regression before it reaches `main` rather
+  than after. For the audience this project now targets (RSE, academic
+  CDTs), a green CI badge is evidence of discipline independent of
+  feature count — worth having before any of the validated DSP stages
+  below, not after.
 
 **Exit criteria**
 `python -c "import librosa, fastapi, sqlalchemy"` runs clean inside the
-venv. `ffmpeg -version` returns a version.
+venv. `ffmpeg -version` returns a version. A push to the GitHub remote
+triggers a CI run and it passes.
 
 ---
 
@@ -38,277 +58,253 @@ venv. `ffmpeg -version` returns a version.
 
 **Produces**
 - `backend/audio/loader.py`: loads any supported format, resamples to
-  44.1kHz mono and stereo variants, returns a structured object
+  44.1kHz, returns mono and stereo arrays plus metadata via a
+  `LoadedAudio` dataclass
 - Format detection, lossy-format flagging
 - SHA-256 file hashing for the cache
-- Tests against a WAV, an MP3 and an M4A
+- `tests/test_loader.py`: pytest suite against synthetic fixtures,
+  manually cross-checked against real WAV/MP3 tracks
 
 **I must understand**
-- Why we normalise sample rate on load
+- Why we normalise sample rate on load, and what the Nyquist–Shannon
+  sampling theorem actually says about why that's not just relabeling
 - What `librosa.load` returns and what `sr` and `mono` do
 - Why analysing an MP3 for frequency balance is misleading, and what
   the lossy flag is protecting me from
+- Why streaming SHA-256 hashing works block-by-block rather than
+  needing the whole file in memory (Merkle–Damgård construction)
 
 **Exit criteria**
-Load one of my own tracks in three formats and get consistent duration,
-sample rate and hash behaviour.
+*(Done, 2026-08-21.)* Load one of my own tracks in WAV and MP3 and get
+consistent duration, sample rate, and hash behaviour. M4A untested — no
+M4A files were available; logged as a known gap, not blocking.
 
 ---
 
-### Stage 3 — Core feature extraction
+### Stage 3 — Welch spectral estimation, from scratch
+
+This is the first of the three from-scratch components. It's also the
+foundation the frequency-balance and mono/phase-compatibility analyses
+in later stages are built on, so it comes first.
 
 **Produces**
-- `backend/audio/features.py` with one function per feature group:
-  - Temporal: BPM, beat grid, onset positions
-  - Spectral: centroid, rolloff, bandwidth, band energies
-    (sub <60Hz, bass 60–200, low-mid 200–800, mid 800–4k, high >4k)
-  - Perceptual: RMS, dynamic range, LUFS
-  - Harmonic: chroma, key and mode detection
-- Each returns plain Python or NumPy types, ready to serialise
+- `backend/audio/spectral.py`: Welch's method for power spectral
+  density estimation, implemented directly — windowing (Hann), segment
+  overlap, periodogram averaging — not `scipy.signal.welch`
+- A validation test: run the implementation against synthetic signals
+  of known spectral content (pure sinusoids, white noise) and compare
+  against `scipy.signal.welch` on the same input
 
 **I must understand**
-- What an MFCC actually is and why it is the standard audio fingerprint
-- What the spectral centroid measures perceptually
-- How LUFS differs from RMS and peak, and why streaming platforms use it
-- How key detection from chroma works and where it fails
+- What a periodogram is, and why a single one is a high-variance,
+  unreliable PSD estimate
+- Why segmenting the signal, windowing each segment, and averaging
+  their periodograms (Welch's method) trades frequency resolution for
+  reduced variance
+- What a window function (Hann) is doing, and why windowing prevents
+  spectral leakage
+- Why segments overlap (commonly 50%), and what that buys versus
+  non-overlapping segments
 
 **Exit criteria**
-Run on five of my tracks. BPM and key match what I know to be correct.
-Numbers are plausible, not obviously broken.
+Own implementation's PSD estimate agrees with `scipy.signal.welch`'s
+output on the same synthetic test signals, within a tolerance defined
+when the validation test is written (the exact number depends on
+window/segment choices made while implementing it — not invented in
+advance of doing the work).
 
 ---
 
-### Stage 4 — Mix translation analysis
+### Stage 4 — LUFS loudness, from scratch (ITU-R BS.1770)
 
-This is the stage that solves my actual problem. It is the heart of the
-project.
+**The load-bearing stage.** ITU-R BS.1770 is a published standard: a
+K-weighting filter chain (two cascaded biquad filters), mean-square
+power, an absolute gate at −70 LUFS, and a relative gate at −10 LU
+below the absolute-gated mean. Implementing it and proving numerical
+agreement with independent reference implementations is a genuinely
+strong claim — stronger than most of what an undergraduate portfolio
+can show. If the calendar tightens, protect this stage's rigour before
+cutting into Stage 8's dashboard polish. This may reasonably take two
+sessions.
 
 **Produces**
-- `backend/audio/translation.py`:
-  - Mono compatibility: sum to mono, measure energy loss per band,
-    return a 0–100 score and the bands where phase cancellation is worst
-  - Low-end analysis: sub versus bass balance, flag imbalance
-  - Frequency balance versus a genre reference curve, returning
-    deviation in dB per band
-  - Loudness targets: measured LUFS against Spotify (−14), Apple (−16)
-    and club (−8) references, with the gain adjustment each implies
-  - Dynamic range assessment and over-compression flag
-- Reference curves stored as data, not hardcoded in logic
+- `backend/audio/loudness.py`: the K-weighting filter chain, mean-square
+  calculation, two-stage gating, integrated loudness — all from the
+  specification, not a library call
+- A validation test: compare integrated loudness against `pyloudnorm`
+  and ffmpeg's `ebur128` filter, on both real tracks and synthetic
+  signals (including edge cases: near-silence, heavy limiting, a quiet
+  ambient passage)
 
 **I must understand**
-- Why summing to mono reveals phase problems, and what phase
-  cancellation is doing physically
-- Why sub versus bass balance is the most common translation failure
-- What loudness normalisation does to my track on streaming services
+- What "loudness" means perceptually, and why it differs from RMS and
+  peak
+- What K-weighting approximates about human frequency sensitivity, and
+  what each of the two biquad stages in the ITU-R chain is
+  compensating for
+- Why gating exists: without it, silence and very quiet passages would
+  drag down a track's measured "typical" loudness
+- Why streaming platforms standardised on integrated LUFS rather than
+  peak or RMS for loudness normalisation
 
 **Exit criteria**
-Run on a track I know translates badly and a track I know translates
-well. The scores should separate them. If they do not, the analysis is
-wrong and we fix it before moving on.
+Own implementation agrees with both `pyloudnorm` and ffmpeg's
+`ebur128` to within 0.1 LU, across a test set covering real tracks and
+the deliberate edge cases above.
 
 ---
 
-### Stage 5 — Database layer
+### Stage 5 — Mono compatibility and phase, from scratch
+
+Built directly on Stage 3's Welch PSD estimator: mono compatibility is
+measured by comparing per-band energy in the stereo signal against
+per-band energy after summing to mono.
 
 **Produces**
-- `backend/db/models.py`: SQLAlchemy models for `tracks`, `features`,
-  `classifications`, `feedback`
+- `backend/audio/mono_compat.py`: per-band energy comparison between
+  stereo and mono-summed signal, identifying where and how severely
+  phase cancellation is occurring
+- A validation test: construct a synthetic stereo signal with a known
+  phase-inverted component at a known frequency and magnitude, and
+  assert the analysis detects it at the correct frequency and severity
+
+**I must understand**
+- What phase cancellation is physically: two waveforms inverted or
+  delayed relative to each other partially or fully cancel when summed
+- Why comparing per-band stereo energy against per-band mono-summed
+  energy, using the Stage 3 PSD estimator, reveals exactly where
+  cancellation is happening
+- The relationship between phase difference (0° to 180°) and the
+  resulting energy loss on summing
+
+**Exit criteria**
+Given a synthetic stereo signal with a known phase-inverted component,
+the analysis correctly identifies the affected frequency band and a
+severity consistent with the known magnitude of the injected
+cancellation.
+
+---
+
+### Stage 6 — Track intelligence (librosa) and the database layer
+
+BPM/beat tracking and key/mode detection stay as `librosa` calls —
+deliberately, not by default. Beat tracking has no firm ground truth
+even for a human listener on syncopated or tempo-varying material, so
+the validation bar Stages 3–5 hold themselves to doesn't apply, and
+reimplementing it would cost a stage for a claim I couldn't honestly
+make.
+
+**Produces**
+- BPM and beat grid, key and mode, via `librosa`
+- Frequency balance against a genre reference curve, built on Stage 3's
+  Welch estimator; low-end (sub vs bass) balance
+- `backend/db/models.py`: SQLAlchemy models for `tracks` and `features`
+  only (see the vault's `spec.md` — `classifications`, `feedback`, and
+  `sections` are Tier 2 tables, not created here)
 - `backend/db/session.py`: engine, session factory
-- Migration or table creation on startup
 - Store and retrieve a full analysis round trip
 
 **I must understand**
-- What an ORM is doing between my Python objects and SQL rows
+- Why BPM and key are library calls when the PSD/loudness/phase
+  components next door are not — the ground-truth criterion, stated
+  precisely, not just "some DSP is hand-rolled and some isn't"
+- What an ORM is doing between Python objects and SQL rows
 - What a session is, when it commits, and why sessions are scoped
-- Why the audio file itself is not in the database
-- Why features live in a separate table from tracks
+- Why the audio file itself is not in the database, and why features
+  live in a separate table from tracks
 
 **Exit criteria**
-Analyse a track, write it to the database, read it back, and get
-identical values.
+Analyse a track using Stages 3–6 together, write it to the database,
+read it back, and get identical values.
 
 ---
 
-## Phase B — API and intelligence (Stages 6–9)
-
-### Stage 6 — FastAPI application and upload endpoint
+### Stage 7 — FastAPI application and background pipeline
 
 **Produces**
 - `backend/main.py`, app factory, CORS for the Vite dev server
 - `POST /tracks` — accepts a file, hashes it, returns a job id
   immediately; returns the cached analysis if the hash is known
 - `GET /tracks/{id}` — returns analysis or job status
-- Pydantic response models
-- Auto-generated docs working at `/docs`
+- Background analysis via FastAPI `BackgroundTasks`, job status
+  tracking (queued, running, complete, failed)
+- A shared-secret access gate: an API key in `.env`, checked via a
+  FastAPI dependency on every route, required from both the frontend
+  and any CLI/`curl` access
+- Integration tests covering the full upload → analyse → retrieve flow,
+  running in CI
 
 **I must understand**
 - What Pydantic models are validating and why the API defines its
   response shapes explicitly
 - What CORS is and why the frontend needs it
-- Why upload returns immediately rather than waiting for analysis
+- Why upload returns immediately rather than waiting for analysis, and
+  why a 30-second analysis can't live inside the request cycle
+- Why a single shared secret is the right amount of access control
+  here, not full user accounts: the app binds to `0.0.0.0` specifically
+  so my phone can reach it over wifi (see `spec.md`, "Devices"), which
+  also means anyone else on the same network can reach it. A shared key
+  closes that off. It is not multi-user authentication, and shouldn't
+  be over-built as if it needed to be — there is one user.
 
 **Exit criteria**
-Upload a track via `/docs`, get a job id, poll it, get an analysis back.
+Upload three tracks in quick succession via `/docs`. All three
+complete, status transitions are visible throughout, and the
+integration test suite passes in CI. A request without the correct API
+key is rejected; one with it succeeds.
 
 ---
 
-### Stage 7 — Background task pipeline
+### Stage 8 — Minimal dashboard, README, freeze
 
 **Produces**
-- Background analysis via FastAPI `BackgroundTasks`
-- Job status tracking: queued, running, complete, failed
-- Progress reporting per stage of the pipeline
-- Error handling that records the failure rather than silently dying
-
-**I must understand**
-- Why a 30-second analysis cannot live inside an HTTP request
-- What happens to a background task if the server restarts, and what
-  that means for reliability
+- Vite React app: metric cards (BPM, key, LUFS, dynamic range, mono
+  score), frequency balance chart, mono compatibility indicator — no
+  polish beyond what's needed to show the numbers clearly
+- `README.md` rewritten as a short technical report: the problem,
+  architecture, and — specifically — the mathematics behind Welch,
+  LUFS, and mono/phase, with their validation results shown, not just
+  what the tool does
+- `.env.example`, setup instructions a stranger could actually follow
+- Test suite runnable in one command, CI green
+- Git tag `v1.0`
 
 **Exit criteria**
-Upload three tracks in quick succession. All three complete. Status
-transitions are visible throughout.
+A stranger can clone the repo, run the test suite, run the app, and
+read a README that explains not just what the tool measures but why
+each measurement is correct. Tag `v1.0` and freeze the repository —
+**28 September is a hard stop**, regardless of what remains unbuilt.
 
 ---
 
-### Stage 8 — Genre and mood classification
+## Tier 2 and Tier 3 — after Tier 1 is frozen
 
-**Produces**
-- FMA dataset acquisition and preprocessing script
-- Feature matrix build from MFCCs plus spectral and rhythmic features
-- Genre classifier trained, evaluated, and serialised to disk
-- Mood model: valence and arousal regression
-- `backend/ml/predict.py` loading the saved models for inference
-- Honest accuracy reporting in the README, including confusion matrix
+Not scheduled, and not started before `v1.0` is tagged. In priority
+order:
 
-**I must understand**
-- Why we output a probability distribution over genres rather than one
-  label
-- What the confusion matrix tells me about which genres the model
-  cannot separate
-- Why training accuracy and held-out accuracy differ
-
-**Exit criteria**
-Classify ten of my own tracks. The predictions are defensible, and
-where the model is wrong I understand why from the confusion matrix.
-
----
-
-### Stage 9 — Claude feedback layer
-
-**Produces**
-- `backend/ai/feedback.py`: builds a structured prompt from the real
-  extracted numbers and calls the Claude API
-- Prompt template versioned in the repo so I can see it evolve
-- Focus modes: mix, low end, loudness, arrangement
-- Response stored against the track
-- Graceful degradation when the API is unreachable
-
-**I must understand**
-- Why grounding the prompt in measured numbers produces specific
-  feedback rather than generic advice
-- Where the API key lives and why it never reaches the frontend
-
-**Exit criteria**
-Feedback on a track says something specific and true that I could act
-on. If it reads like generic production advice, the prompt is wrong and
-we iterate before moving on.
-
----
-
-## Phase C — Frontend (Stages 10–13)
-
-### Stage 10 — Frontend scaffold and API client
-
-**Produces**
-- Vite React app in `frontend/`
-- Dark theme, monospace numerics, responsive breakpoints at 640 and
-  1024px
-- Typed API client, loading and error states
-- Routing: upload, track view, library
-
-**I must understand**
-- What Vite is doing in development versus build
-- How React state drives what renders
-
-**Exit criteria**
-App runs, talks to the backend, shows a track's raw JSON on screen.
-
----
-
-### Stage 11 — Analysis view
-
-**Produces**
-- Waveform display from precomputed peaks
-- Spectrogram
-- Metric cards: BPM, key, LUFS, dynamic range, mono score
-- Frequency balance chart against the genre reference
-- Energy map across the timeline
-- Green/amber/red status colouring driven by actual thresholds
-
-**I must understand**
-- Why we precompute waveform peaks rather than sending raw audio
-- How the threshold colouring is defined, so I trust it
-
-**Exit criteria**
-Analysis view for one of my tracks tells me something about the mix I
-did not already know.
-
----
-
-### Stage 12 — Library and mood plot
-
-**Produces**
-- Track grid with filters: BPM range, key, genre, date, lossy flag
-- Sorting by loudness, energy, dynamic range
-- Valence–arousal scatter plot of the whole catalogue
-- Genre distribution across everything analysed
-
-**Exit criteria**
-Twenty of my tracks loaded. Filtering and sorting behave correctly.
-
----
-
-### Stage 13 — Feedback panel and polish
-
-**Produces**
-- Claude feedback rendered alongside the relevant charts
-- Regenerate with a different focus area
-- Mobile layout verified on my phone over the local network
-- Empty states, error states, loading skeletons
-
-**Exit criteria**
-Full flow works on desktop and on my phone: upload, wait, read, act.
-
----
-
-## Phase D — Delivery (Stage 14)
-
-### Stage 14 — Documentation and portfolio readiness
-
-**Produces**
-- `README.md` written as a short technical report: problem, approach,
-  architecture diagram, methods, model accuracy with confusion matrix,
-  screenshots, limitations, what I would do differently
-- Setup instructions someone else could actually follow
-- `.env.example`
-- Test suite runnable in one command
-- Clean commit history
-
-**Exit criteria**
-I can hand the repo to a stranger and they can run it. I can talk
-through every architectural decision unprompted.
-
----
-
-## Tier 2 and Tier 3 — after Tier 1 is complete
-
-Not scheduled. Do not start these until Stage 14 is done.
-
+- Genre classification (FMA, scikit-learn) — cut from Tier 1 on
+  2026-08-22: a well-trodden exercise with typically mediocre results,
+  disproportionate to what it would have cost against a five-week
+  deadline. Still worth building for its own sake, just not before the
+  freeze.
+- Claude-generated production feedback, with focus modes (mix, low
+  end, loudness, arrangement) — cut from Tier 1 on 2026-08-22. A good
+  feature, reads better as a considered addition to a working, validated
+  system than as a headline feature competing with an LLM-integration
+  trend everyone is already riding.
+- Mood as valence/arousal — cut from Tier 1 on 2026-08-22, and worth
+  reconsidering rather than just delaying: it has no ground truth to
+  validate against, which is exactly the property that rules out
+  hand-rolling it, and equally undermines it as a bolted-on library
+  call. Revisit whether it belongs in the project at all before
+  building it.
 - Section detection: intro, drop, verse, chorus, outro
 - Mastering readiness score
+- Track library with search and filters
 - Progress-over-time charts across the catalogue
-- Reference track comparison
-- EP consistency view
-- Real-time monitor via BlackHole virtual audio device and websockets
-  (this is the macOS equivalent of VB-Cable)
+- Genre-aware reference curves selected automatically from the
+  classification
+- Reference track upload and comparison
+- EP and project consistency view
+- Real-time monitoring from the DAW via a virtual audio device
+- Optional stem upload for deeper breakdown
