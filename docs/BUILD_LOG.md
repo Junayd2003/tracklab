@@ -602,3 +602,86 @@ leave it for now rather than set it up immediately.
   against a genre reference curve (using this session's
   `band_energy()`), and the database layer (`tracks`, `features`
   tables only — see `spec.md`).
+
+---
+
+## Session 8 — 2026-08-30 — CONCEPTS.md literature pass, PDF pipeline fixed
+
+**Done**
+- Thorough revision pass across all five existing `CONCEPTS.md`
+  sections (Stages 1–5), not just new content: wove in primary-source
+  citations directly into explanations rather than leaving them as
+  end-of-section links only, and added concrete worked examples
+  throughout. Specifics: a live `sys.path` comparison for venvs (PEP
+  405 cited), a real NumPy 2.0 breaking change (`np.NaN`/`np.Inf`
+  removed) for dependency pinning (Semantic Versioning cited), a
+  concrete "recovering a deleted secret from git history" example, the
+  auditory masking mechanism behind lossy compression (with the
+  textbook cat/vacuum-cleaner example), a worked aliasing example
+  (30kHz → false 14.1kHz at 44.1kHz) for Nyquist–Shannon, PEP 557 for
+  dataclasses, Welch's original 1967 paper (DOI, IEEE) for Stage 3,
+  EBU Tech 3341 as the actual origin of LUFS's two-stage gating
+  (distinct from ITU-R BS.1770 itself), and a real audio-engineering
+  source (sonible) for Stage 5's mono-compatibility context, including
+  comb-filtering terminology and correlation meters as the standard
+  (coarser) alternative diagnostic. Every new citation was verified to
+  actually load before being added — none guessed
+- Found and properly fixed the `CONCEPTS.pdf` regeneration blocker from
+  Session 7. The real root cause was more fundamental than the
+  sandbox's `platform.mac_ver()` issue found then: Homebrew's
+  `python@3.13` build on this machine (now 3.13.15, patched since
+  Session 1) is linked against a `libexpat` symbol newer than what's
+  actually available at runtime, so anything importing
+  `xml.parsers.expat` — including `pip`'s own vendored `distlib` —
+  fails with a `dlopen` symbol error. Confirmed with a plain
+  `python3 -c "import xml.parsers.expat"`, no sandbox or pip involved,
+  proving this reproduces identically outside Claude Code, in this
+  user's own terminal, right now. Traced through three compounding pip
+  26.2.1 issues along the way (a `truststore` SSL-context crash, a
+  wheel-platform-tag mismatch, and a new `_prevent_import_hook` audit
+  feature misfiring on `--target` installs) before finding the
+  underlying expat problem. Fix: `/usr/bin/python3` (Apple's bundled
+  Python, unaffected) works fine as the docs-tooling venv's base
+  interpreter; `CONCEPTS.md`'s regeneration instructions updated to use
+  it explicitly, with the diagnosis written inline so this doesn't need
+  rediscovering
+- `CONCEPTS.pdf` regenerated successfully: 14 pages, 32 verified link
+  annotations (up from 8 pages / 18 links)
+- `docs/requirements-docs.txt` re-pinned against the working
+  Python 3.9-based environment (the previous pins were Python
+  3.13-specific and don't all resolve on 3.9)
+- Sanity-checked `CLAUDE.md` and `docs/STAGES.md` for staleness —
+  confirmed both current from Session 7's consolidation, no changes
+  needed there this session
+
+**Files touched**
+- `docs/CONCEPTS.md` — literature/examples pass across Stages 1–5, plus
+  updated regeneration instructions
+- `docs/requirements-docs.txt` — re-pinned for Python 3.9 compatibility
+
+**Decisions**
+- None requiring `decisions.md` — this was a documentation-depth and
+  tooling-fix session, not a design choice with alternatives rejected
+
+**Concepts explained**
+- None new for the project itself — this session deepened existing
+  explanations rather than introducing new ones
+
+**In progress / not finished**
+- The underlying Homebrew `python@3.13`/`libexpat` mismatch on this
+  machine is still unfixed at the system level (only worked around for
+  docs tooling via `/usr/bin/python3`). Worth running
+  `brew reinstall expat` (or `python@3.13`) outside any sandboxed tool,
+  in a normal terminal, since it could affect other fresh `pip install`
+  operations on `backend/.venv` too, not just docs tooling
+
+**Open questions**
+- None blocking.
+
+**Exit criteria met?**
+- N/A — documentation and tooling session, no stage exit criteria
+  targeted.
+
+**Next session starts with**
+- Stage 6: `librosa`-based BPM/key detection, frequency balance
+  against a genre reference curve, and the database layer.
