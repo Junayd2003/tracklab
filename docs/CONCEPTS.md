@@ -320,21 +320,365 @@ this stage.
 
 ---
 
+## Stage 3 — Welch spectral estimation, from scratch
+
+**Note (2026-08-22):** the stage numbering changed after a project
+rescope — genre/mood classification and the Claude feedback layer were
+cut from Tier 1, and the remaining work was renumbered from fourteen
+stages to eight. See `docs/STAGES.md` and the vault's `decisions.md`
+for the reasoning. The Stage 1/2 sections above are unaffected.
+
+### What we built
+
+`backend/audio/spectral.py`: `_periodic_hann()` for window generation,
+`_windowed_periodogram()` for one segment's contribution, and `welch()`
+tying them together — segmenting, windowing, and averaging. Covered by
+9 pytest tests in `tests/test_spectral.py`, validating against
+`scipy.signal.welch` on synthetic sine waves and white noise to
+`rtol=1e-9` — effectively floating-point-limit agreement, not merely
+"close."
+
+### Why a single periodogram isn't good enough
+
+A periodogram — the squared magnitude of a signal's FFT — is an
+estimate of its power spectral density, but a statistically poor one:
+its variance doesn't shrink as you feed it more data of the same kind.
+A periodogram computed over 10 seconds of noise looks just as jagged
+and unreliable as one computed over 1 second — longer input buys finer
+frequency resolution, not a less noisy estimate. Welch's method exists
+specifically to fix this.
+
+### Welch's method: segment, window, average
+
+Split the signal into (usually overlapping) segments, compute a
+periodogram for each, and average them. Averaging several independent
+noisy estimates reduces variance — the same principle behind averaging
+repeated measurements in any experimental science. The cost is
+resolution: each segment is shorter than the full signal, and frequency
+bin spacing is `fs / segment_length`, so shorter segments mean coarser
+frequency detail. That trade-off — variance down, resolution down — is
+tuned entirely by the choice of segment length.
+
+### Windowing and spectral leakage
+
+A segment is a snippet chopped out of a longer signal, not a naturally
+periodic waveform. The FFT implicitly treats whatever it's given as one
+period of an infinitely repeating signal; if a segment's two raw ends
+don't meet up smoothly — they essentially never do — that discontinuity
+smears energy across frequency bins that shouldn't have any, an effect
+called spectral leakage. A window function tapers each segment's edges
+toward zero before the FFT, hiding the mismatched endpoints, at the
+cost of slightly widening every frequency bin. No window eliminates
+leakage; each just trades one kind of inaccuracy for another.
+
+### The bug: symmetric vs periodic windows
+
+Worth documenting in full, since this was a real bug caught by testing,
+not a hypothetical one. `np.hanning(N)` generates the *symmetric* Hann
+window — it touches exactly zero at both its first and last sample,
+the natural definition if you picture the window as a standalone shape.
+For FFT-based spectral analysis specifically, the *periodic* (DFT-even)
+variant is the correct one instead: computed as if there were one extra
+sample past the end, at whatever point would make repeated copies of
+the window tile together smoothly, with that extra sample then
+discarded. The two differ by a genuinely tiny amount — `sum(window**2)`
+differs by about 0.02% for a 4096-sample window — which is exactly the
+kind of thing that shows up as a normalisation-scale error, not a
+shape error, in a PSD estimate.
+
+That's precisely what happened: the first full comparison between the
+from-scratch `welch()` and `scipy.signal.welch()` showed a consistent
+`~2×10⁻⁴` relative error — small, but far above the `~10⁻⁷`
+floating-point noise already established as the honest baseline from
+Stage 2's single-segment check. A *consistent* discrepancy of a
+specific, small size — the same at every frequency, not random — is
+the fingerprint of a scale or normalisation mismatch, not a logic
+error, and worth recognising as such before ever opening the code to
+look for a bug. Confirming `np.hanning()` against
+`scipy.signal.get_window('hann', N)` directly showed they were
+different windows; replacing it with the periodic formula
+(`0.5 - 0.5*cos(2*pi*n/N)` — note dividing by `N`, not `N-1`) brought
+agreement to `~10⁻¹⁵`, true machine precision.
+
+### PSD scaling and the one-sided spectrum
+
+Two further deliberate scaling choices inside `_windowed_periodogram`:
+
+- Dividing by `fs * sum(window**2)`: dividing by `fs` converts "power
+  per sample" into "power per Hz" — a density, comparable across
+  different sample rates or segment lengths. Dividing by the window's
+  own summed squared value corrects for the energy the window itself
+  removed by tapering samples toward zero.
+- Doubling every bin except DC and Nyquist: `np.fft.rfft` returns only
+  the non-negative-frequency half of a real signal's (necessarily
+  symmetric) spectrum, discarding the other half's energy. Doubling
+  restores it, since a real signal's total power splits evenly between
+  the redundant negative and positive frequency halves.
+
+### Why `welch()` doesn't detrend
+
+`scipy.signal.welch`'s default subtracts each segment's mean before
+computing its periodogram (`detrend='constant'`) — sensible for
+arbitrary sensor data that might carry a DC offset, irrelevant for
+audio, which doesn't. The validation tests pass `detrend=False` to
+scipy explicitly, so the comparison honestly checks the same algorithm
+on both sides rather than comparing two deliberately different things
+and reporting the gap as a bug.
+
+### References
+
+- [`scipy.signal.welch` documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.welch.html) — confirms the periodic Hann default and `detrend='constant'` default
+- [`scipy.signal.get_window` documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.get_window.html) — the `fftbins` parameter and periodic vs symmetric windows
+- [Spectral leakage — Wikipedia](https://en.wikipedia.org/wiki/Spectral_leakage)
+- [Window function — Wikipedia](https://en.wikipedia.org/wiki/Window_function) — covers the symmetric vs DFT-even Hann variants directly
+
+---
+
+## Stage 4 — LUFS loudness, from scratch (ITU-R BS.1770)
+
+### What we built
+
+`backend/audio/loudness.py`: `_high_shelf_coefficients()` and
+`_high_pass_coefficients()` generate the two K-weighting biquad
+filters; `_k_weight()` chains them; `integrated_loudness()` implements
+the block-based mean-square measurement and two-stage gating. Covered
+by 7 pytest tests in `tests/test_loudness.py`, validating against
+`pyloudnorm` (and, where ffmpeg is available, ffmpeg's `ebur128`
+filter) to within 0.1 LU on sine waves, white noise, and three named
+edge cases: near-silence, heavy limiting, and a quiet passage.
+Real-track agreement was also checked manually against both references
+on `data/samples/` — exact match against `pyloudnorm`, within ffmpeg's
+displayed precision against `ebur128` — recorded in `BUILD_LOG.md`
+rather than the automated suite, for the same reproducibility reason as
+Stage 2 and Stage 3.
+
+### Why loudness isn't RMS or peak
+
+Peak level tells you the single loudest sample, nothing about how loud
+a track *sounds* over time — a track that's mostly quiet with one brief
+spike has a high peak but doesn't feel loud. RMS (root-mean-square)
+averages energy over time, closer to perceived loudness, but treats all
+frequencies as equally important, which human hearing doesn't: two
+tracks with identical RMS can sound very differently loud if their
+energy sits in different parts of the spectrum. LUFS starts from RMS's
+idea of a time-averaged measurement, but applies frequency weighting
+first (K-weighting) and adds gating to exclude the fact that a
+"typical" measurement of an inconsistent signal.
+
+### K-weighting: two biquad filters, RBJ cookbook formulas
+
+K-weighting applies two IIR filters in series, both generated from the
+public "RBJ Audio EQ Cookbook" formulas (the same reference
+`pyloudnorm` itself uses by default — see `decisions.md`,
+2026-08-28):
+
+- **A high-shelf filter** (+4dB above ~1500Hz) approximating the boost
+  in perceived level from head diffraction at high frequencies — sound
+  above roughly 1.5kHz reaches the eardrum somewhat amplified by the
+  head and ear's own shape, and K-weighting compensates by weighting
+  those frequencies up before measuring.
+- **A high-pass filter** (the "RLB" stage, cutting below ~38Hz)
+  approximating reduced human sensitivity to very low frequencies —
+  sub-bass content contributes less to perceived loudness than its raw
+  energy would suggest, so it's weighted down.
+
+Deriving the filter *coefficients* from these formulas, and building
+the two-stage gating algorithm around them, is the from-scratch work.
+Applying an already-derived biquad via `scipy.signal.lfilter` is an
+execution primitive — the same role `np.fft.rfft` played in Stage 3's
+Welch implementation, not "the algorithm" itself.
+
+### The two-stage gating, and why each stage exists
+
+After K-weighting, the signal is split into 400ms blocks with 75%
+overlap, and the mean-square power of each block is measured. Two
+gates are then applied before averaging:
+
+- **Absolute gate, −70 LUFS**: drops any block quieter than this fixed
+  threshold outright — near-silence (a gap between songs, a quiet
+  intro) shouldn't count toward "how loud does this track sound,"
+  since a listener doesn't perceive silence as part of a track's
+  loudness at all.
+- **Relative gate, −10 LU below the absolute-gated mean**: drops blocks
+  that are quiet *relative to the track's own average*, computed
+  fresh after the first gate. A loud track with one deliberately sparse
+  breakdown shouldn't measure as quieter overall just because of that
+  one section — this gate protects the measurement from being pulled
+  down by material that's quiet by artistic choice, not by being
+  literally silent.
+
+The final loudness is the mean-square power of only the blocks that
+survive both gates, converted to LUFS via a fixed calibration constant
+(`−0.691`) that the ITU-R standard specifies directly as part of what
+"LUFS" is defined to mean — not something derived from first
+principles inside this codebase.
+
+### Checking the exit criteria were achievable before writing any code
+
+Before implementing anything, `pyloudnorm` and ffmpeg's `ebur128` were
+run against the same real track to check they actually agreed with
+each other to within 0.1 LU — if they hadn't, the stated exit criteria
+("agree with both to within 0.1 LU") would have been unsatisfiable
+regardless of implementation quality, no matter how correct the code
+was. They agreed closely (−14.4192 vs −14.4 LUFS), which confirmed 0.1
+LU was a real, achievable target rather than an arbitrary number
+written down in advance of doing the work.
+
+### A test that failed for the right reason
+
+`test_absolute_gate_ignores_leading_silence` initially compared a
+"10s near-silence + 5s tone" signal's measured loudness against a
+"5s tone alone" measurement, expecting them to match within 0.1 LU.
+They didn't — off by about 0.13 LU. Rather than loosen the tolerance,
+the first check was whether `pyloudnorm` agreed with *my*
+implementation on the exact same edge-case signal: it did, exactly. The
+test's assumption was the bug, not the code — one block straddles the
+silence/tone boundary and isn't cleanly gated out, and the filter has a
+brief transient right at that discontinuity, both correct properties
+of the algorithm on an artificial instant-silence-to-full-volume jump
+that real audio never actually does. The fix was rewriting the test to
+compare against the reference on the *same* signal, not against an
+unrelated one. The general lesson, same shape as Stage 3's window bug:
+when an automated check disagrees with an independent reference, check
+which one is wrong before assuming it's the implementation.
+
+### References
+
+- [RBJ Audio EQ Cookbook](http://shepazu.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html) — the public biquad filter formulas used for both K-weighting stages
+- [ITU-R BS.1770 recommendation page](https://www.itu.int/rec/R-REC-BS.1770) — current published version is BS.1770-5 (2023); this implementation targets what's commonly described as BS.1770-4's algorithm, matching `pyloudnorm`'s own stated target — the difference between the two hasn't been checked
+- [`pyloudnorm` on PyPI](https://pypi.org/project/pyloudnorm/)
+- [ffmpeg `ebur128` filter documentation](https://ffmpeg.org/ffmpeg-filters.html#ebur128)
+
+---
+
+## Stage 5 — Mono compatibility, from scratch
+
+### What we built
+
+`backend/audio/mono_compat.py`: `mono_compatibility(stereo, fs)`,
+comparing each frequency band's energy in the source stereo channels
+against its energy after summing to mono, using Stage 3's `welch()`
+and a small addition to `spectral.py` — `BAND_RANGES` (the named
+sub/bass/low-mid/mid/high bands `spec.md` already defines) and
+`band_energy()`, which integrates a PSD estimate into total power per
+band. Added to `spectral.py` rather than duplicated here, since Stage
+6's frequency-balance feature will need the exact same band vocabulary.
+Covered by 8 pytest tests in `tests/test_mono_compat.py`, validated
+against a formula derived from first principles (below), not an
+external library — there isn't one for this specific question.
+
+### What phase cancellation actually is
+
+Two identical waveforms, summed, reinforce each other — this is
+**constructive interference**. Two perfectly inverted waveforms
+(one is the exact negative of the other), summed, cancel completely —
+**destructive interference**. Real stereo mixes sit somewhere between
+these extremes: a stereo widener, a chorus effect, or just two
+different microphones on the same source will leave left and right
+partially, not perfectly, correlated at any given frequency. When
+those two channels get summed down to mono — exactly what happens on a
+phone speaker, a mono Bluetooth speaker, or a club system's mono
+subwoofer stack — whatever cancellation exists becomes audible as
+thinned-out or missing content, even though the same material sounded
+full in stereo.
+
+### The exact relationship: energy loss as a function of phase difference
+
+For two equal-amplitude sine waves at frequency `f` with phase
+difference `φ` between them, a standard trigonometric identity
+(sum-to-product) gives:
+
+```
+sin(θ) + sin(θ + φ) = 2·cos(φ/2)·sin(θ + φ/2)
+```
+
+Averaging (not just summing) the two channels — the same convention
+`load_audio()` uses for `mono` — divides this by 2, giving a combined
+amplitude of `cos(φ/2)` times the original amplitude. Since energy is
+proportional to amplitude squared, the **fraction of energy retained**
+after mono-summing is `cos²(φ/2)`, and the **fraction lost** is
+`sin²(φ/2)`. Three checkpoints worth having memorised:
+
+- `φ = 0` (in phase): `sin²(0) = 0` — nothing lost, perfect
+  reinforcement.
+- `φ = π/2` (quadrature, 90° out of phase): `sin²(π/4) = 0.5` — exactly
+  half the energy lost.
+- `φ = π` (fully inverted): `sin²(π/2) = 1` — complete cancellation.
+
+This is exactly what `mono_compatibility()` is built to detect, and
+exactly what its validation test checks: inject a known `φ` at a known
+frequency, and confirm the measured energy loss in the corresponding
+band matches `sin²(φ/2)` — constructed ground truth, in the absence of
+an external reference implementation for this specific measurement.
+
+### Scope: energy loss per band, not a full phase measurement
+
+Worth being precise about what this stage does and doesn't measure.
+`welch()` computes a PSD via `|FFT|²` — the squared magnitude of the
+spectrum — which discards phase information entirely as part of the
+computation. Comparing `welch(mono)` against the channels' own PSDs
+therefore measures *how much energy was lost* summing to mono, not the
+actual phase difference between L and R at each frequency (which would
+need something like cross-correlation or a Hilbert transform on the
+raw waveforms, a meaningfully bigger undertaking). This narrower scope
+was a deliberate choice, confirmed before writing any code: it's
+exactly what `spec.md` and `STAGES.md`'s exit criteria ask for
+("per-band energy comparison... identifying where and how severely"),
+and energy loss is the thing that's actually audible — a
+producer doesn't hear "these channels are 73° out of phase," they hear
+"the bass disappeared on my phone speaker."
+
+### A bug from spectral leakage, and the fix
+
+Worth documenting properly, same as Stage 3's window bug. The first
+version compared each band's *loss fraction* directly, treating any
+band with zero source energy as trivially "no loss." Testing a single
+1kHz tone (which belongs entirely to the "mid" band, 800–4000Hz)
+revealed the reported `worst_band` was consistently **"sub"** —
+wrong, and wrong in a way worth understanding rather than just fixing.
+
+The cause: Stage 3's Hann windowing reduces spectral leakage but
+doesn't eliminate it — a pure tone still contributes a tiny, non-zero
+amount of energy to every frequency bin, just many orders of magnitude
+smaller than its true peak (measured here: ~`10⁻¹⁴` in the "sub" band
+against ~`0.5` in "mid", a fourteen-orders-of-magnitude gap). That
+leaked energy isn't random noise — it's a scaled echo of the real
+tone, carrying the *same* phase relationship between channels as the
+tone itself. So a fully-inverted tone's leakage into "sub" shows the
+same ~100% loss fraction as the real cancellation in "mid," even
+though "sub" contains no meaningful signal at all. The fix: a band's
+loss fraction is only reported if that band holds a meaningful share
+of the signal's *total* energy (`>10⁻⁶` of it); below that, it's
+treated as noise, not a finding. The general lesson: a measurement
+computed from negligible data is not a small version of the truth, it
+can be an arbitrary, misleading number that happens to look plausible.
+
+### Why the score is energy-weighted, not a plain average
+
+A related design correction, caught by the same test: initially, the
+overall `score` averaged the loss fraction across all five bands
+equally. For a signal that's a single fully-inverted 1kHz tone — 100%
+of its actual energy destroyed on mono-summing — this gave a score of
+80/100, since four bands with zero real content each contributed a
+"perfect" 0%-loss score that diluted the one band that mattered. The
+fix weights each band's contribution to the score by its actual share
+of total energy, so a track that's entirely mid-range and loses all of
+it scores near 0, and a mixed-content signal (confirmed in testing:
+equal energy in an unaffected bass tone and a fully-cancelled mid tone)
+scores proportionally — 50, not an unweighted 60 (only two of five
+bands affected) or 100 (if the empty bands wrongly dominated). A score
+is only as meaningful as what it's actually averaging over.
+
+### References
+
+- [Wave interference — Wikipedia](https://en.wikipedia.org/wiki/Wave_interference) — constructive/destructive interference and the `cos(φ/2)` combined-amplitude result for two phase-shifted sinusoids
+
+---
+
 ## What's next
 
-**Note (2026-08-22):** the stage numbering above changed after a
-project rescope — genre/mood classification and the Claude feedback
-layer were cut from Tier 1, and the remaining work was renumbered from
-fourteen stages to eight. See `docs/STAGES.md` and the vault's
-`decisions.md` for the reasoning. The Stage 2 section above is
-unaffected; everything from here on refers to the new numbering.
-
-Stage 3 (Welch power spectral density estimation, from scratch) will
-get its own section here once it exists: what a periodogram is and why
-it's a noisy PSD estimate on its own, what windowing and segment
-overlap are doing, and why averaging periodograms trades resolution for
-reduced variance. Stage 4 (LUFS loudness, from scratch, ITU-R BS.1770)
-follows: the K-weighting filter chain, the two-stage gating, and why
-integrated loudness rather than RMS or peak. Stage 5 (mono/phase
-compatibility, from scratch) after that. Not written yet, on purpose —
-this document tracks the code, it doesn't get ahead of it.
+Stage 6 (librosa-based BPM/key detection, frequency balance against a
+genre reference curve using this same `band_energy()` utility, and the
+database layer) will get its own section here once it exists. Not
+written yet, on purpose — this document tracks the code, it doesn't
+get ahead of it.

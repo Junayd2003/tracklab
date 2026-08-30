@@ -232,3 +232,9 @@ polish before cutting into Stage 4's validation rigour — the LUFS
 implementation validated to within 0.1 LU against two independent
 references is the strongest single artefact in the repository, and is
 worth protecting over a nicer chart.
+
+Tier 2 is paced for after the freeze, not before: roughly six
+fortnightly sessions across October–December 2026, one planning
+session in mid-October to start. Full feature list and reasoning in
+the vault's `spec.md`. Do not suggest or start Tier 2 work before
+`v1.0` is tagged.

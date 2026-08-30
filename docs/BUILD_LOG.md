@@ -318,3 +318,287 @@ directory, and the venvs contain macOS-specific compiled binaries that
 wouldn't run on Windows regardless. The correct mechanism (a GitHub
 remote, already needed for CI) was proposed but the user chose to
 leave it for now rather than set it up immediately.
+
+---
+
+## Session 4 — 2026-08-28 — Stage 3: Welch spectral estimation, from scratch
+
+**Done**
+- Committed the Session 3 rescope and the CONCEPTS.md/PDF tooling,
+  previously uncommitted, as two separate commits with accurate
+  messages (double-checked against the actual diff first, since
+  `BUILD_LOG.md`'s Session 3 entry hadn't mentioned the 2026-08-23
+  shared-secret addition that was already in the same working tree)
+- `backend/audio/spectral.py` built: `_periodic_hann()`,
+  `_windowed_periodogram()`, `welch()` — Hann window, 4096-sample
+  segments, 50% overlap, implemented directly rather than calling
+  `scipy.signal.welch`
+- `tests/test_spectral.py`: 9 pytest tests, all passing, validating
+  against `scipy.signal.welch` on synthetic sine waves and white noise
+  to `rtol=1e-9`
+- Full test suite (25 tests total) passes with no regressions
+
+**Files touched**
+- `backend/audio/spectral.py` — Welch's method, from scratch
+- `tests/test_spectral.py` — validation suite against scipy
+- `docs/STAGES.md` — Stage 3 marked done
+- `docs/CONCEPTS.md` — Stage 3 section added (periodogram, windowing,
+  the symmetric-vs-periodic Hann bug, references)
+
+**Decisions**
+- Hann window, 4096-sample segments, 50% overlap, with the same
+  explicit parameters passed to both implementations in the validation
+  test rather than relying on either's defaults (logged to vault
+  `decisions.md`, 2026-08-28, before any code was written)
+- `welch()` deliberately does not detrend each segment (remove the
+  mean) the way `scipy.signal.welch`'s default does — audio doesn't
+  carry a meaningful DC offset, so there's nothing to correct for. The
+  validation test passes `detrend=False` to scipy to compare the same
+  thing on both sides, not silently compare two different algorithms.
+
+**Concepts explained**
+- What a periodogram is and why Welch's method (segment, window,
+  average) reduces its variance (also logged to vault `learning.md`)
+- Symmetric vs periodic Hann windows, and why FFT-based spectral
+  analysis needs the periodic variant — found as a real bug, not a
+  hypothetical: the first full `welch()` vs `scipy.signal.welch`
+  comparison showed a consistent `~2×10⁻⁴` relative error, traced to
+  `np.hanning()` (symmetric) vs `scipy`'s internal `get_window('hann',
+  N)` (periodic) producing very slightly different windows. Fixed by
+  writing the periodic Hann formula directly; agreement then tightened
+  to `~10⁻¹⁵`, floating-point limit (also logged to vault
+  `learning.md`)
+
+**In progress / not finished**
+- Nothing mid-built. Stage 3 is complete.
+
+**Open questions**
+- None blocking.
+
+**Exit criteria met?**
+- Yes. `rtol=1e-9` agreement with `scipy.signal.welch` on sine waves
+  and white noise — see `docs/STAGES.md`, Stage 3.
+
+**Next session starts with**
+- Stage 4: LUFS loudness from scratch (ITU-R BS.1770), validated
+  against `pyloudnorm` and ffmpeg's `ebur128` to within 0.1 LU. Flagged
+  in `STAGES.md` as the load-bearing stage — may take two sessions.
+
+---
+
+## Session 5 — 2026-08-28 — Stage 4: LUFS loudness, from scratch
+
+**Done**
+- Before writing any code, checked whether `pyloudnorm` and ffmpeg's
+  `ebur128` already agreed with each other on a real track — they did
+  (−14.4192 vs −14.4 LUFS), confirming the stated 0.1 LU exit criterion
+  was achievable rather than an arbitrary number
+- `backend/audio/loudness.py` built: K-weighting via two biquad filters
+  (RBJ cookbook formulas — high-shelf, high-pass), 400ms block-based
+  mean-square measurement with 75% overlap, two-stage gating (absolute
+  −70 LUFS, relative −10 LU), `integrated_loudness()`
+- `tests/test_loudness.py`: 7 pytest tests, all passing — sine, white
+  noise, ffmpeg cross-check, and all three named edge cases
+  (near-silence, heavy limiting, a quiet passage)
+- Manually verified against real tracks in `data/samples/`: exact
+  match against `pyloudnorm` on all three test tracks; within ffmpeg's
+  displayed precision (1 decimal place) against `ebur128`
+- `pyloudnorm` installed and pinned in `requirements.txt`
+- Full test suite (31 tests total) passes with no regressions
+- Stage 3's still-uncommitted code (`spectral.py`,
+  `tests/test_spectral.py`) and this session's Stage 4 work both sit
+  ready to commit — held, same as usual, pending confirmation
+
+**Files touched**
+- `backend/audio/loudness.py` — K-weighting, gating, integrated
+  loudness, from scratch
+- `tests/test_loudness.py` — validation suite against pyloudnorm and
+  ffmpeg
+- `requirements.txt` — added `pyloudnorm==0.2.0`
+- `docs/STAGES.md` — Stage 4 marked done, BS.1770-4 vs -5 gap noted
+- `docs/CONCEPTS.md` — Stage 4 section added
+
+**Decisions**
+- RBJ cookbook biquad formulas over `pyloudnorm`'s alternative
+  "DeMan" (bit-exact ITU coefficient) filters — the 0.1 LU target
+  didn't need bit-exact reproduction, and checking achievability first
+  confirmed the simpler approach was sufficient (logged to vault
+  `decisions.md`, 2026-08-28)
+
+**Concepts explained**
+- Why LUFS differs from RMS and peak (also logged to vault
+  `learning.md`, pending my own attempt first)
+- K-weighting: what the high-shelf and high-pass stages each
+  approximate about human hearing (also logged to vault `learning.md`,
+  pending my own attempt first)
+- The two-stage gating and why each gate exists separately (also
+  logged to vault `learning.md`, pending my own attempt first)
+- A test failure diagnosed correctly: `pyloudnorm` agreeing exactly
+  with my implementation on the same edge-case signal proved the test's
+  *assumption* was wrong, not the code — same shape as Stage 3's window
+  bug, opposite conclusion
+
+**In progress / not finished**
+- Nothing mid-built. Stage 4 is complete.
+- One open, explicitly-flagged gap: implemented against what's
+  commonly described as BS.1770-**4**'s algorithm; the current
+  published standard is BS.1770-**5** (2023) — the difference between
+  them hasn't been checked
+
+**Open questions**
+- None blocking.
+
+**Exit criteria met?**
+- Yes. 0.1 LU agreement with both `pyloudnorm` and ffmpeg's `ebur128`
+  — see `docs/STAGES.md`, Stage 4, for the full detail including the
+  BS.1770-4/-5 caveat.
+
+**Next session starts with**
+- Stage 5: mono/phase compatibility, from scratch, built on Stage 3's
+  Welch estimator. User has asked to pause here to catch up on theory
+  and comprehension before continuing — this is a deliberate stop, not
+  a blocker.
+
+---
+
+## Session 6 — 2026-08-29 — Post-freeze planning: Tier 2 cadence and feature list
+
+**Done**
+- Planning-only session, no code: agreed a realistic post-freeze
+  cadence for Tier 2 — roughly six fortnightly sessions, two to three
+  hours each, across October to December 2026. Realistic because the
+  backend and dashboard scaffolding from Tier 1 will already exist by
+  then, so Tier 2 sessions are additive, not foundational
+- Tier 2 formally laid out for the first time since the 2026-08-22
+  rescope (it had only existed as terse one-line bullets until now):
+  genre-aware reference curves, track library with search/filters,
+  progress-over-time charts, mastering readiness score, section
+  detection — ordered roughly least to most effort, section detection
+  flagged as the most expensive of the five
+  - Noted the connection between genre-aware reference curves and the
+    deferred genre classifier: the curves work off a manual genre tag
+    either way, but become more useful automatically if a (even
+    simple) classifier gets added during Tier 2
+- Recommended a mid-October planning session (after term starts, after
+  the freeze lands) to scope the Tier 2 API additions, rather than
+  starting Tier 2 with a build session directly
+- Logged to Claude Code's own memory system (`tracklab_timeline.md`,
+  project-type), separate from the vault, so the cadence and freeze
+  date are available without needing to re-read the full vault
+
+**Files touched**
+- (vault) `spec.md` — Tier 2 section rewritten with the full feature
+  list, effort ordering, and the genre-curve/classifier connection
+- `CLAUDE.md` — short pointer added to "Scope discipline": Tier 2 is
+  paced for after the freeze, full detail lives in `spec.md`
+- Claude Code memory: `tracklab_timeline.md` (new), `MEMORY.md` (new)
+
+**Decisions**
+- None requiring `decisions.md` — this is a scheduling/capacity plan,
+  not an architectural choice with alternatives rejected
+
+**Concepts explained**
+- None — planning session
+
+**In progress / not finished**
+- Stage 5 (mono/phase compatibility) still not started — this session
+  was entirely about Tier 2, not Tier 1 build work
+
+**Open questions**
+- None blocking.
+
+**Exit criteria met?**
+- N/A — planning session, no stage exit criteria targeted
+
+**Next session starts with**
+- Stage 5: mono/phase compatibility, from scratch, built on Stage 3's
+  Welch estimator, whenever the user is done catching up on theory.
+
+---
+
+## Session 7 — 2026-08-30 — Stage 5: Mono compatibility, from scratch
+
+**Done**
+- Confirmed the right scope before writing code: energy-loss-per-band
+  (matching `STAGES.md`'s exit criteria), not a full phase-difference
+  measurement via cross-correlation/Hilbert transform
+- `backend/audio/spectral.py` gained `BAND_RANGES` and `band_energy()`
+  — shared band vocabulary, added there rather than duplicated in
+  `mono_compat.py`, since Stage 6's frequency-balance feature needs
+  the same bands
+- `backend/audio/mono_compat.py` built: `mono_compatibility(stereo, fs)`,
+  deriving `mono` internally as `stereo.mean(axis=0)` (same invariant
+  as `load_audio()`, not accepted as a separate argument)
+- Validated against a first-principles formula, not a library: for two
+  equal-amplitude sinusoids at phase difference φ, energy loss on
+  mono-summing should equal `sin²(φ/2)`. Measured to within 1% across
+  φ = 0, π/2, π
+- Two real bugs caught and fixed by testing before being called done:
+  spectral leakage causing a spurious "worst band" on a single test
+  tone (fixed with an energy-materiality threshold), and an unweighted
+  score diluting a fully-cancelled signal's severity (fixed by
+  weighting by each band's actual energy share)
+- `tests/test_mono_compat.py`: 8 pytest tests, all passing
+- Full test suite (40 tests total) passes with no regressions
+- `docs/CONCEPTS.md` Stage 5 section written: phase cancellation
+  physics, the `sin²(φ/2)` derivation, both bugs documented in full,
+  regenerated to PDF
+
+**Files touched**
+- `backend/audio/mono_compat.py` — mono compatibility, from scratch
+- `backend/audio/spectral.py` — added `BAND_RANGES`, `band_energy()`
+- `tests/test_mono_compat.py` — validation suite against theory
+- `docs/STAGES.md` — Stage 5 marked done
+- `docs/CONCEPTS.md` — Stage 5 section added
+
+**Decisions**
+- Energy-loss-per-band scope, not full phase measurement (logged to
+  vault `decisions.md`, 2026-08-30)
+- Shared band vocabulary in `spectral.py` (logged to vault
+  `decisions.md`, 2026-08-30)
+- Energy-materiality threshold and energy-weighted scoring — both bug
+  fixes, logged to vault `decisions.md`, 2026-08-30
+
+**Concepts explained**
+- Phase cancellation as destructive interference, and the `sin²(φ/2)`
+  energy-loss formula derived from the sum-to-product identity (also
+  logged to vault `learning.md`, pending my own attempt first)
+- Why a measurement computed from negligible-energy data isn't a small
+  version of the truth — it can be an arbitrary, misleading number
+  (also logged to vault `learning.md`, pending my own attempt first)
+
+**In progress / not finished**
+- Stage 5's actual code and tests are complete. `docs/CONCEPTS.pdf` is
+  now one stage behind `CONCEPTS.md`'s source (missing the Stage 5
+  section) — regenerating it hit a real, unrelated environment bug:
+  pip 26.2.1's vendored `truststore` module crashes at import time
+  because `platform.mac_ver()` returns empty inside this sandboxed
+  tool environment (it can't read the system version plist), and this
+  now blocks *any* fresh `pip install`, confirmed in both `docs/.venv`
+  and `backend/.venv`, not just the docs tooling. A `sitecustomize.py`
+  shim worked around the immediate crash, but a further dependency
+  (`cffi`, pulled in transitively by `xhtml2pdf` → `pyHanko`, a PDF
+  *signing* library we don't use) needed a source build that failed
+  for follow-on, unrelated reasons (build isolation not inheriting the
+  shim; no `setuptools` when isolation was disabled). Stopped digging
+  once it was clear this was a genuine infrastructure issue, not
+  something in the project's own code.
+
+**Open questions**
+- The pip/`mac_ver` issue above will need resolving before any new
+  dependency can be installed in this sandboxed environment — worth
+  checking whether it reproduces outside the sandbox (a plain
+  terminal) before Stage 7 needs new packages.
+
+**Exit criteria met?**
+- Yes, for Stage 5 itself. Energy loss matches `sin²(φ/2)` to within
+  1% across three tested phase differences; `worst_band` correctly
+  identifies the affected band in every case. `CONCEPTS.pdf`
+  regeneration is the one open item, blocked by the environment issue
+  above, not by anything in Stage 5's own work.
+
+**Next session starts with**
+- Stage 6: `librosa`-based BPM/key detection, frequency balance
+  against a genre reference curve (using this session's
+  `band_energy()`), and the database layer (`tracks`, `features`
+  tables only — see `spec.md`).

@@ -107,11 +107,10 @@ in later stages are built on, so it comes first.
   non-overlapping segments
 
 **Exit criteria**
-Own implementation's PSD estimate agrees with `scipy.signal.welch`'s
-output on the same synthetic test signals, within a tolerance defined
-when the validation test is written (the exact number depends on
-window/segment choices made while implementing it — not invented in
-advance of doing the work).
+*(Done, 2026-08-28.)* Own implementation's PSD estimate agrees with
+`scipy.signal.welch`'s output on synthetic sine waves and white noise,
+to within `rtol=1e-9` — effectively floating-point-limit agreement, not
+just "close." Hann window, 4096-sample segments, 50% overlap.
 
 ---
 
@@ -148,9 +147,15 @@ sessions.
   peak or RMS for loudness normalisation
 
 **Exit criteria**
-Own implementation agrees with both `pyloudnorm` and ffmpeg's
-`ebur128` to within 0.1 LU, across a test set covering real tracks and
-the deliberate edge cases above.
+*(Done, 2026-08-28.)* Own implementation agrees with both `pyloudnorm`
+and ffmpeg's `ebur128` to within 0.1 LU — exactly, on real tracks
+against `pyloudnorm`; within displayed precision against ffmpeg; and
+across all three named synthetic edge cases (near-silence, heavy
+limiting, a quiet passage). One open gap: implemented against what's
+commonly described as BS.1770-**4**'s algorithm (matching
+`pyloudnorm`'s own stated target); the current published standard is
+BS.1770-**5** (2023), and what changed between them hasn't been
+checked.
 
 ---
 
@@ -178,10 +183,10 @@ per-band energy after summing to mono.
   resulting energy loss on summing
 
 **Exit criteria**
-Given a synthetic stereo signal with a known phase-inverted component,
-the analysis correctly identifies the affected frequency band and a
-severity consistent with the known magnitude of the injected
-cancellation.
+*(Done, 2026-08-30.)* Given synthetic stereo signals with known
+phase-inverted components (0, π/2, and π radians tested), the analysis
+correctly identifies the affected frequency band and measures energy
+loss matching the theoretical `sin²(φ/2)` prediction to within 1%.
 
 ---
 
