@@ -84,3 +84,32 @@ def welch(
     freqs = np.fft.rfftfreq(nperseg, d=1 / fs)
     return freqs, psd
 
+
+# Named frequency bands in Hz, per spec.md's Tier 1 mix-translation
+# description (sub/bass boundaries are stated there explicitly;
+# low-mid/mid/high extend the same vocabulary). Shared here rather than
+# defined separately in mono_compat.py and again in Stage 6's
+# frequency-balance feature, since both need the same band vocabulary
+# to report against.
+BAND_RANGES = {
+    "sub": (0.0, 60.0),
+    "bass": (60.0, 200.0),
+    "low_mid": (200.0, 800.0),
+    "mid": (800.0, 4000.0),
+    "high": (4000.0, float("inf")),
+}
+
+
+def band_energy(freqs: np.ndarray, psd: np.ndarray) -> dict[str, float]:
+    """Aggregate a PSD estimate into total power per named band.
+
+    A PSD is power *per Hz* (a density), not power per bin -- so
+    getting the actual power within a band means summing the PSD
+    across that band's bins and multiplying by the frequency spacing
+    between bins, approximating the integral of PSD over that band.
+    """
+    bin_width = freqs[1] - freqs[0]
+    return {
+        name: float(np.sum(psd[(freqs >= lo) & (freqs < hi)]) * bin_width)
+        for name, (lo, hi) in BAND_RANGES.items()
+    }
