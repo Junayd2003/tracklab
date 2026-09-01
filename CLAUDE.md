@@ -77,7 +77,9 @@ repo I cannot read.
 ├── CLAUDE.md                        ← this file
 ├── docs/
 │   ├── STAGES.md                    ← the staged build plan
-│   └── BUILD_LOG.md                 ← running session log, updated by you
+│   ├── BUILD_LOG.md                 ← running session log, updated by you
+│   ├── CONCEPTS.md                  ← theory companion: why each concept is true, cited
+│   └── CODE_GUIDE.md                ← code companion: the same stages, via real source snippets
 ├── backend/
 ├── frontend/
 └── tests/

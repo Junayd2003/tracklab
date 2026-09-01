@@ -23,10 +23,11 @@ backend/ml/models/*.joblib
 frontend/node_modules/
 frontend/dist/
 
-# Docs tooling — its own venv, and the PDF is a regenerated build
-# output of CONCEPTS.md, not a source file
+# Docs tooling — its own venv, and the PDFs are regenerated build
+# output of CONCEPTS.md/CODE_GUIDE.md, not source files
 docs/.venv/
 docs/CONCEPTS.pdf
+docs/CODE_GUIDE.pdf
 
 # OS / editor
 .DS_Store

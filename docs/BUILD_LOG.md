@@ -685,3 +685,59 @@ leave it for now rather than set it up immediately.
 **Next session starts with**
 - Stage 6: `librosa`-based BPM/key detection, frequency balance
   against a genre reference curve, and the database layer.
+
+---
+
+## Session 9 — 2026-09-02 — New document: CODE_GUIDE.md
+
+**Done**
+- Created `docs/CODE_GUIDE.md`: a code-first companion to
+  `CONCEPTS.md`, same stage structure, walking through the real current
+  source of `loader.py`, `spectral.py`, `loudness.py`, and
+  `mono_compat.py` function by function — each with its actual code
+  inline, algorithm/origin, purpose within tracklab, call sites, and a
+  logic walkthrough. Source pulled fresh from disk immediately before
+  writing, so every snippet matches the real files exactly
+- Cross-linked the two documents: `CONCEPTS.md`'s intro now explains
+  the theory/code split, and each of its four stage sections links to
+  `CODE_GUIDE.md`'s corresponding section
+- Generalised `docs/build_pdf.py` to render both documents (was
+  hardcoded to `CONCEPTS.md` only); `CODE_GUIDE.pdf` now regenerates
+  alongside `CONCEPTS.pdf` from one command
+- `CODE_GUIDE.pdf` generated: 9 pages
+- Fixed two long-standing gaps in `CLAUDE.md`'s "Where things live"
+  tree: neither `CONCEPTS.md` nor the (now newly added) `CODE_GUIDE.md`
+  were ever listed there, noticed while adding the new file
+- `.gitignore` updated for `docs/CODE_GUIDE.pdf` (same regenerated-
+  build-output treatment as `CONCEPTS.pdf`)
+
+**Files touched**
+- `docs/CODE_GUIDE.md` — new
+- `docs/CONCEPTS.md` — intro and four stage sections updated with
+  cross-links
+- `docs/build_pdf.py` — generalised to a list of (source, output) pairs
+- `CLAUDE.md` — "Where things live" tree corrected
+- `.gitignore` — added `docs/CODE_GUIDE.pdf`
+
+**Decisions**
+- Two documents (theory vs code), not one merged document (logged to
+  vault `decisions.md`, 2026-09-02)
+
+**Concepts explained**
+- None new — this session organised and cross-referenced existing
+  understanding rather than introducing new concepts
+
+**In progress / not finished**
+- Nothing mid-built. Both documents are current with all code through
+  Stage 5.
+
+**Open questions**
+- None blocking.
+
+**Exit criteria met?**
+- N/A — documentation session, no stage exit criteria targeted.
+
+**Next session starts with**
+- Stage 6: `librosa`-based BPM/key detection, frequency balance
+  against a genre reference curve, and the database layer. `CODE_GUIDE.md`
+  gets a Stage 6 section once that code exists, same rule as `CONCEPTS.md`.

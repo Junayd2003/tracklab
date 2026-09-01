@@ -10,6 +10,12 @@ section at a time as each stage is completed. It does not get written
 ahead of the code; Stage 3 gets a section once Stage 3 exists, not
 before.
 
+This is the theory-first half of a pair: [`CODE_GUIDE.md`](CODE_GUIDE.md)
+is its code-first counterpart, walking through the same stages via the
+actual source with real snippets inline — algorithm origins, purpose,
+call sites, logic. Read this document for *why* something is true;
+read `CODE_GUIDE.md` for exactly how that theory became code.
+
 Regenerate the PDF after editing this file with:
 
 ```
@@ -195,7 +201,8 @@ worth being able to name which is which:
 returns a `LoadedAudio` dataclass holding mono and stereo arrays,
 sample rate, duration, the lossy flag, the hash, and the format.
 Covered by 16 pytest tests in `tests/test_loader.py` against
-synthetically generated fixtures.
+synthetically generated fixtures. Full annotated source:
+[`CODE_GUIDE.md` § Stage 2](CODE_GUIDE.md#stage-2--backendaudioloaderpy).
 
 ### Cryptographic hashing: SHA-256
 
@@ -447,7 +454,8 @@ tying them together — segmenting, windowing, and averaging. Covered by
 9 pytest tests in `tests/test_spectral.py`, validating against
 `scipy.signal.welch` on synthetic sine waves and white noise to
 `rtol=1e-9` — effectively floating-point-limit agreement, not merely
-"close."
+"close." Full annotated source:
+[`CODE_GUIDE.md` § Stage 3](CODE_GUIDE.md#stage-3--backendaudiospectralpy).
 
 ### Why a single periodogram isn't good enough
 
@@ -575,7 +583,8 @@ Real-track agreement was also checked manually against both references
 on `data/samples/` — exact match against `pyloudnorm`, within ffmpeg's
 displayed precision against `ebur128` — recorded in `BUILD_LOG.md`
 rather than the automated suite, for the same reproducibility reason as
-Stage 2 and Stage 3.
+Stage 2 and Stage 3. Full annotated source:
+[`CODE_GUIDE.md` § Stage 4](CODE_GUIDE.md#stage-4--backendaudioloudnesspy).
 
 ### Why loudness isn't RMS or peak
 
@@ -703,7 +712,9 @@ band. Added to `spectral.py` rather than duplicated here, since Stage
 6's frequency-balance feature will need the exact same band vocabulary.
 Covered by 8 pytest tests in `tests/test_mono_compat.py`, validated
 against a formula derived from first principles (below), not an
-external library — there isn't one for this specific question.
+external library — there isn't one for this specific question. Full
+annotated source:
+[`CODE_GUIDE.md` § Stage 5](CODE_GUIDE.md#stage-5--backendaudiomono_compatpy).
 
 ### What phase cancellation actually is
 

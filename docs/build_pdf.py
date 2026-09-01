@@ -1,9 +1,16 @@
-"""Render CONCEPTS.md to CONCEPTS.pdf.
+"""Render CONCEPTS.md and CODE_GUIDE.md to PDF.
 
 Not part of the tracklab application — a standalone tool with its own
 venv (see the regenerate instructions at the top of CONCEPTS.md), kept
 out of backend/requirements.txt so the app's dependency list stays
 about the app, not about producing a PDF from documentation.
+
+Cross-file links between the two documents (e.g. CODE_GUIDE.md linking
+to CONCEPTS.md#some-anchor) work when reading the .md files directly
+(GitHub, an editor) but won't be clickable within a standalone PDF,
+since each PDF is rendered independently -- a known, accepted
+limitation. The .md files are the primary reading format; the PDFs are
+an offline convenience.
 """
 
 from pathlib import Path
@@ -12,8 +19,10 @@ import markdown
 from xhtml2pdf import pisa
 
 DOCS_DIR = Path(__file__).parent
-SOURCE = DOCS_DIR / "CONCEPTS.md"
-OUTPUT = DOCS_DIR / "CONCEPTS.pdf"
+DOCUMENTS = [
+    (DOCS_DIR / "CONCEPTS.md", DOCS_DIR / "CONCEPTS.pdf"),
+    (DOCS_DIR / "CODE_GUIDE.md", DOCS_DIR / "CODE_GUIDE.pdf"),
+]
 
 CSS = """
 @page {
@@ -84,20 +93,25 @@ ul, ol {
 """
 
 
-def build() -> None:
-    md_text = SOURCE.read_text(encoding="utf-8")
+def build_one(source: Path, output: Path) -> None:
+    md_text = source.read_text(encoding="utf-8")
     body_html = markdown.markdown(
         md_text, extensions=["fenced_code", "tables", "sane_lists"]
     )
     full_html = f"<html><head><style>{CSS}</style></head><body>{body_html}</body></html>"
 
-    with open(OUTPUT, "wb") as out:
+    with open(output, "wb") as out:
         result = pisa.CreatePDF(full_html, dest=out)
 
     if result.err:
-        raise RuntimeError(f"PDF generation failed with {result.err} error(s)")
+        raise RuntimeError(f"PDF generation failed for {source.name} with {result.err} error(s)")
 
-    print(f"Wrote {OUTPUT}")
+    print(f"Wrote {output}")
+
+
+def build() -> None:
+    for source, output in DOCUMENTS:
+        build_one(source, output)
 
 
 if __name__ == "__main__":
