@@ -705,6 +705,25 @@ leave it for now rather than set it up immediately.
   hardcoded to `CONCEPTS.md` only); `CODE_GUIDE.pdf` now regenerates
   alongside `CONCEPTS.pdf` from one command
 - `CODE_GUIDE.pdf` generated: 9 pages
+- **Follow-up same session:** code blocks in the PDF weren't rendering
+  like a real editor — flat, uncoloured text. Added proper Pygments
+  syntax highlighting (keywords, strings, comments, decorators all
+  coloured, matching what VS Code or GitHub would show) plus inline
+  line numbers, generated via `markdown`'s `codehilite` extension.
+  Hit two real tooling snags along the way: `codehilite`'s
+  `extension_configs` path coerces every value through a strict bool
+  parser that rejects the string `'inline'` even though Pygments'
+  own formatter accepts it (worked around by constructing the
+  extension instance directly and setting its config dict, bypassing
+  the validator); and `xhtml2pdf`'s CSS parser doesn't support the
+  `:not()` selector (removed it — normal CSS cascade/specificity
+  already achieved the same effect without it). Also replaced the one
+  snippet that wasn't a faithful full copy of the source
+  (`integrated_loudness()` had elided the `np.errstate` blocks with a
+  footnote) with the complete, exact function body — verified
+  indentation is preserved correctly in the rendered PDF by extracting
+  its text and checking the whitespace matches the source exactly.
+  `CODE_GUIDE.pdf` is now 10 pages
 - Fixed two long-standing gaps in `CLAUDE.md`'s "Where things live"
   tree: neither `CONCEPTS.md` nor the (now newly added) `CODE_GUIDE.md`
   were ever listed there, noticed while adding the new file
