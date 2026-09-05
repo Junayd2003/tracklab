@@ -101,6 +101,18 @@ comfortable and nearly useless under real questioning. A log that also
 shows my own first-attempt words, wrong ones included, is a more honest
 record of what I can actually defend.
 
+**Temporary adjustment, agreed 2026-09-05, through the Stage 6–8 push
+to the freeze:** given 23 days remained at the time this was agreed,
+skip the in-the-moment quizzing below for these three stages —
+prioritise implementation velocity and correctness. This is a deferral,
+not a cut: `CONCEPTS.md` and `CODE_GUIDE.md` still get updated as each
+piece is built, exactly as before, so the material exists intact.
+Once `v1.0` is tagged, run a dedicated post-freeze session (or several)
+covering theory, syntax, code logic, and system design across
+everything built — using the checkpoint style below, properly, not
+skipped. Revert to the full protocol immediately once that catch-up
+pass is done, or sooner if the calendar pressure eases before then.
+
 **At the start of a session**
 
 1. Before reading anything, ask me to explain one or two things from

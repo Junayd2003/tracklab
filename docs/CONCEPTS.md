@@ -839,10 +839,131 @@ is only as meaningful as what it's actually averaging over.
 
 ---
 
+## Stage 6 — Track intelligence, frequency balance, and the database layer
+
+### What we built
+
+`backend/audio/intelligence.py`: `detect_bpm()` and `detect_key()`, via
+`librosa` — deliberately not validated to a tolerance the way Stages
+3–5 are (`decisions.md`, 2026-08-22). `backend/audio/frequency_balance.py`:
+`frequency_balance()`, a generic per-band dB profile built on Stage 3's
+`welch()`/`band_energy()`. `backend/db/models.py` and `session.py`:
+SQLAlchemy models for `tracks` and `features`, engine, session factory.
+Full annotated source:
+[`CODE_GUIDE.md` § Stage 6](CODE_GUIDE.md#stage-6--track-intelligence-frequency-balance-and-the-database-layer).
+
+### Beat tracking, briefly, and why its errors are structural
+
+`librosa.beat.beat_track()` estimates tempo by tracking periodicity in
+an onset-strength signal — where in the track note attacks cluster
+rhythmically. The ambiguity this project's own tests immediately
+surfaced (detecting 74.9 BPM against a claimed 150) is called the
+**octave error**: a track's rhythm is often periodic at multiple
+nested levels simultaneously (the full beat, the half-time feel, a
+double-time subdivision), and nothing about the audio signal itself
+picks out which level a human would call "the tempo" — that's a
+convention, not a physical property of the waveform. This is exactly
+why beat tracking has no tight ground truth to validate against, and
+why it stays a plain library call here.
+
+### Key detection: chroma plus the Krumhansl-Schmuckler algorithm
+
+A **chroma vector** collapses a signal's full spectrum down to 12 bins,
+one per pitch class (C, C#, D, ...), by folding all octaves of the same
+pitch class together — `librosa.feature.chroma_cqt()` computes this
+per time-frame; averaging across time gives one 12-dimensional summary
+of "how much of each pitch class is present overall."
+
+The **Krumhansl-Schmuckler key-finding algorithm** then asks: which
+key's expected pitch-class distribution does this chroma vector look
+most like? Krumhansl and Kessler's 1982 experiments (cited below) had
+listeners rate, on a scale, how well each of the 12 chromatic pitches
+fit after hearing a musical context establishing a key — the tonic
+scored highest, the fifth and third scored next, and so on, producing
+one 12-number "profile" for major and one for minor. Correlating a
+track's chroma vector against all 24 rotations of these two profiles
+(one rotation per possible tonic) and taking the best match gives the
+detected key and mode — implemented in `detect_key()` via
+`np.roll()` to generate each rotation and `np.corrcoef()` to score it.
+
+**Where it fails, observed directly**: on a track labelled C minor,
+the algorithm detected G minor — not a bug, but the textbook
+tonic/dominant confusion this method is known for. G is the fifth of C
+(its dominant); strong V–I harmonic motion in a track's chord
+progression produces a chroma profile that resembles the dominant's
+own profile almost as closely as the true tonic's, and the algorithm
+has no way to distinguish "this pitch is prominent because it's the
+tonic" from "this pitch is prominent because the dominant chord is
+prominent." Confirmed, not corrected — per the 2026-08-22 decision not
+to invest hand-rolled correctness work into BPM/key detection.
+
+### Frequency balance: relative to a track's own total, not absolute
+
+`frequency_balance()` expresses each band's energy in dB *relative to
+the track's own total energy* (`10·log10(band_energy / total_energy)`),
+not an absolute level. This means every value is ≤0dB (a band can hold
+at most the entire signal), and — the actual point — two tracks with
+identical spectral *shape* but different overall loudness report
+identical results, since loudness cancels out of the ratio entirely.
+Sub-vs-bass balance, which `STAGES.md` asks for separately, falls out
+for free as `result["sub"] - result["bass"]`: both figures are already
+on the same relative scale, so their difference is exactly the dB
+relationship between the two bands, needing no separate computation.
+
+### Why there's no hardcoded genre reference-curve data
+
+Unlike LUFS or Welch's method, there is no rigorous, citable, published
+standard for "the correct spectral balance for genre X" — this
+project's usual bar for from-scratch implementation. A mastering
+education resource confirms this directly: it recommends comparing
+against chosen reference tracks specifically *because* fixed frequency
+targets don't generalise across different productions (cited below).
+So `frequency_balance()` was built as a generic function, callable on
+any track, and a "genre reference curve" is simply that same function
+called on a track a user personally designates as their reference —
+no genre-specific numbers invented or hardcoded anywhere in the
+backend (`decisions.md`, 2026-09-05).
+
+### What an ORM is doing
+
+An **object-relational mapper** translates between two different ways
+of organising the same data: objects in running code (a `Track`
+instance with a `.features` attribute) and rows across related tables
+in a relational database (a `tracks` row joined to a `features` row via
+a foreign key). `backend/db/models.py`'s `Track` and `Features` classes
+*are* the mapping — SQLAlchemy's declarative `Mapped`/`mapped_column`
+annotations describe both the Python attribute and the SQL column it
+corresponds to in one declaration, and `relationship()` describes how
+the foreign key connects the two tables' worth of columns back into
+one navigable `.features` attribute.
+
+### What a session is, and why it's scoped
+
+A SQLAlchemy `Session` is what actually talks to the database — per
+SQLAlchemy's own documentation (cited below), it's a "holding zone" for
+mapped objects during one transaction, tracking every object added or
+queried during that transaction, flushing pending changes on
+`.commit()`, and discarding them on `.rollback()`. Crucially, a Session
+is a mutable, stateful object meant for one unit of work at a time —
+SQLAlchemy's documentation explicitly warns against sharing one Session
+across concurrent operations, which is exactly why `session.py` exposes
+`SessionLocal` as a *factory* (`sessionmaker(bind=engine)`) rather than
+one shared instance: every `with SessionLocal() as session:` block gets
+its own, used for exactly one unit of work, then closed.
+
+### References
+
+- [`librosa.beat.beat_track` documentation](https://librosa.org/doc/0.11.0/generated/librosa.beat.beat_track.html)
+- Krumhansl, C. L., & Kessler, E. J. (1982). [Tracing the dynamic changes in perceived tonal organization in a spatial representation of musical keys](https://doi.org/10.1037/0033-295X.89.4.334). *Psychological Review*, 89(4), 334–368.
+- [Understanding Mastering EQ: Balancing the Spectrum — masteringthemix.com](https://www.masteringthemix.com/blogs/learn/understanding-mastering-eq-balancing-the-spectrum) — states that fixed frequency targets are the wrong approach; recommends comparison against chosen reference tracks instead
+- [Object–relational mapping — Wikipedia](https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping)
+- [SQLAlchemy: Session Basics](https://docs.sqlalchemy.org/en/20/orm/session_basics.html) — the identity map, transaction/commit behaviour, and why a Session isn't shared across concurrent units of work
+
+---
+
 ## What's next
 
-Stage 6 (librosa-based BPM/key detection, frequency balance against a
-genre reference curve using this same `band_energy()` utility, and the
-database layer) will get its own section here once it exists. Not
-written yet, on purpose — this document tracks the code, it doesn't
-get ahead of it.
+Stage 7 (FastAPI application, background job pipeline, the
+shared-secret access gate) will get its own section here once it
+exists. Not written yet, on purpose — this document tracks the code,
+it doesn't get ahead of it.

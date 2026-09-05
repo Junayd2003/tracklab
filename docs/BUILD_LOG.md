@@ -760,3 +760,103 @@ leave it for now rather than set it up immediately.
 - Stage 6: `librosa`-based BPM/key detection, frequency balance
   against a genre reference curve, and the database layer. `CODE_GUIDE.md`
   gets a Stage 6 section once that code exists, same rule as `CONCEPTS.md`.
+
+---
+
+## Session 10 — 2026-09-05 — Stage 6: Track intelligence, frequency balance, database layer
+
+**Pacing note:** agreed with the user to skip live understanding
+checkpoints (retrieval questions, "why" pauses) for Stages 6-8, given
+23 days remained before the freeze at session start. Documentation
+(this file, `CONCEPTS.md`, `CODE_GUIDE.md`, `decisions.md`) is still
+kept fully current — the deferral is teaching pace, not documentation.
+A dedicated post-freeze session will properly cover theory, syntax,
+code logic, and system design across everything built during this
+faster stretch. Logged to `CLAUDE.md`'s session protocol and to Claude
+Code's own memory (`tracklab_pacing_agreement.md`) so this isn't lost
+if a future session starts fresh.
+
+**Done**
+- Descoped "frequency balance against a genre reference curve" before
+  writing any code: no hardcoded genre data (researched and found no
+  rigorous citable source for genre-specific spectral targets — a
+  mastering-education source explicitly recommends reference-track
+  comparison over fixed targets instead). `frequency_balance()` is a
+  generic per-band function; a "reference curve" is that same function
+  called on a user-chosen reference track, a dashboard concern (Stage
+  8), not backend data
+- `backend/audio/intelligence.py`: `detect_bpm()` and `detect_key()`
+  via `librosa`. Verified `librosa.beat.beat_track`'s actual return
+  types empirically (tempo comes back as a NumPy array, not a plain
+  float) before writing code around it. Key detection uses the
+  Krumhansl-Schmuckler algorithm with the published Krumhansl-Kessler
+  (1982) profiles, verified against independent sources before
+  hardcoding
+- Tested against real tracks: correctly detected F# minor on one
+  track; on `PS Cmin 160.mp3` detected 161.5 BPM (close to the claimed
+  160) but G minor rather than C minor (the dominant, a well-known
+  tonic/dominant confusion in chroma-based key detection) and 74.9 BPM
+  on the other track (exactly half of its claimed 150 -- the classic
+  beat-tracking octave error). Both left as observed, not "fixed" --
+  per the existing decision not to invest correctness effort into
+  BPM/key detection
+- `backend/audio/frequency_balance.py`: `frequency_balance()`, per-band
+  dB relative to the track's own total energy -- normalises for
+  loudness, and gives sub-vs-bass balance for free as a subtraction
+- `backend/db/models.py` and `session.py`: SQLAlchemy `Track`/`Features`
+  models (2.0-style declarative), engine, session factory, `init_db()`.
+  Field names updated from the original pre-rescope plan to match what
+  the codebase actually produces (no `dynamic_range`/`spectral_centroid`,
+  five frequency bands not four)
+- Stage 6's actual exit criterion met and tested end-to-end: a real
+  track run through Stages 3-6, written to the database, read back,
+  values identical (`tests/test_db.py::test_full_pipeline_round_trip_on_a_real_track`)
+- 14 new tests across three new test files (`test_intelligence.py`: 5,
+  `test_frequency_balance.py`: 6, `test_db.py`: 3). Full suite: 54
+  passing, no regressions
+- `docs/CONCEPTS.md` and `docs/CODE_GUIDE.md` Stage 6 sections written;
+  PDFs regenerated
+
+**Files touched**
+- `backend/audio/intelligence.py` — new
+- `backend/audio/frequency_balance.py` — new
+- `backend/db/models.py` — new
+- `backend/db/session.py` — new
+- `tests/test_intelligence.py`, `tests/test_frequency_balance.py`,
+  `tests/test_db.py` — new
+- `docs/STAGES.md` — Stage 6 marked done
+- `docs/CONCEPTS.md`, `docs/CODE_GUIDE.md` — Stage 6 sections added
+- `CLAUDE.md` — pacing adjustment noted in session protocol
+- (vault) `spec.md` — data model corrected to match real fields
+- (vault) `decisions.md` — four new entries, 2026-09-05
+
+**Decisions**
+- No hardcoded genre reference-curve data (vault `decisions.md`)
+- Frequency balance relative to total energy, not absolute (vault
+  `decisions.md`)
+- Krumhansl-Schmuckler for key detection, not skipping key detection
+  entirely (vault `decisions.md`)
+- Skip live teaching checkpoints for Stages 6-8, catch up post-freeze
+  (this file, `CLAUDE.md`, Claude Code memory)
+
+**Concepts explained**
+- Octave error in beat tracking; tonic/dominant confusion in
+  chroma-based key detection; the Krumhansl-Schmuckler algorithm; ORM
+  mapping and SQLAlchemy Session scoping (all in `CONCEPTS.md` -- not
+  quizzed live this session, per the pacing note above)
+
+**In progress / not finished**
+- Nothing mid-built. Stage 6 is complete.
+
+**Open questions**
+- None blocking.
+
+**Exit criteria met?**
+- Yes. Full pipeline (Stages 3-6) round-trips through the database
+  with identical values on a real track.
+
+**Next session starts with**
+- Stage 7: FastAPI application, background job pipeline, and the
+  shared-secret access gate. First new subsystem of this stretch
+  (HTTP, background tasks) -- still moving at the faster Stage 6-8
+  pace agreed this session.

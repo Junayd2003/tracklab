@@ -219,8 +219,16 @@ make.
   live in a separate table from tracks
 
 **Exit criteria**
-Analyse a track using Stages 3–6 together, write it to the database,
-read it back, and get identical values.
+*(Done, 2026-09-05.)* Analyse a track (`PS Cmin 160 24.wav`) using
+Stages 3–6 together, write it to the database, read it back, and get
+identical values — confirmed in
+`tests/test_db.py::test_full_pipeline_round_trip_on_a_real_track`.
+Frequency balance against a genre reference curve was descoped along
+the way: no hardcoded genre data, since no rigorous published source
+for it exists — `frequency_balance()` is a generic per-band function,
+and a "reference curve" is that same function called on a
+user-designated reference track, picked in the dashboard (Stage 8),
+not baked into the backend.
 
 ---
 

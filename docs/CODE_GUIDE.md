@@ -645,3 +645,237 @@ number tracklab produces comes from this one function.
    signal whose real content is entirely in one band and gets fully
    cancelled scores near 0, not diluted by four empty bands each
    contributing a "perfect" score (the second Stage 5 bug fix).
+
+---
+
+## Stage 6 — Track intelligence, frequency balance, and the database layer
+
+Theory: [`CONCEPTS.md` § Stage 6](CONCEPTS.md#stage-6--track-intelligence-frequency-balance-and-the-database-layer).
+
+### `detect_bpm()` and `detect_key()` — `backend/audio/intelligence.py`
+
+```python
+_MAJOR_PROFILE = np.array(
+    [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+)
+_MINOR_PROFILE = np.array(
+    [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+)
+
+_PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def detect_bpm(mono: np.ndarray, fs: int) -> float:
+    tempo, _ = librosa.beat.beat_track(y=mono, sr=fs)
+    return float(tempo[0])
+
+
+def detect_key(mono: np.ndarray, fs: int) -> tuple[str, str]:
+    chroma = librosa.feature.chroma_cqt(y=mono, sr=fs)
+    chroma_mean = chroma.mean(axis=1)
+
+    best_key, best_mode, best_corr = _PITCH_CLASSES[0], "major", -np.inf
+    for i in range(12):
+        major_corr = np.corrcoef(chroma_mean, np.roll(_MAJOR_PROFILE, i))[0, 1]
+        minor_corr = np.corrcoef(chroma_mean, np.roll(_MINOR_PROFILE, i))[0, 1]
+
+        if major_corr > best_corr:
+            best_corr, best_key, best_mode = major_corr, _PITCH_CLASSES[i], "major"
+        if minor_corr > best_corr:
+            best_corr, best_key, best_mode = minor_corr, _PITCH_CLASSES[i], "minor"
+
+    return best_key, best_mode
+```
+
+**Algorithm / origin:** `detect_bpm` — librosa's own beat tracker
+(onset-strength periodicity). `detect_key` — chroma extraction via
+librosa, then the Krumhansl-Schmuckler key-finding algorithm on top,
+using the published Krumhansl-Kessler (1982) profiles (DOI in
+`CONCEPTS.md`).
+
+**Purpose here:** every BPM/key value tracklab reports comes from these
+two functions — the only place `librosa`'s beat/chroma APIs are called
+directly.
+
+**Called from:** `tests/test_intelligence.py`; will be called by Stage
+7's pipeline once it exists.
+
+**Logic:** `detect_bpm` calls `librosa.beat.beat_track`, which returns
+`tempo` as a NumPy array (confirmed empirically, not from memory —
+`array([161.499...])`, not a plain float), so `float(tempo[0])` extracts
+the scalar. `detect_key` computes `chroma_cqt` (a `(12, n_frames)`
+array, one row per pitch class, chroma index 0 = C) and averages over
+time (`axis=1`) into one 12-vector. The loop tries all 12 possible
+tonics: `np.roll(_MAJOR_PROFILE, i)` shifts the profile so that
+position `j` holds the fit-rating for pitch class `j` when the tonic is
+pitch class `i` — `np.roll(profile, i)[j] == profile[(j - i) % 12]`,
+exactly the rating for "j semitones above tonic i, evaluated i
+semitones early." `np.corrcoef(a, b)[0, 1]` extracts the correlation
+coefficient between the chroma vector and each rotated profile; the
+loop keeps whichever (tonic, mode) pair correlates best across all 24
+candidates.
+
+---
+
+### `frequency_balance()` — `backend/audio/frequency_balance.py`
+
+```python
+def frequency_balance(mono: np.ndarray, fs: int) -> dict[str, float]:
+    freqs, psd = welch(mono, fs)
+    energy = band_energy(freqs, psd)
+    total = sum(energy.values())
+
+    if total <= 0:
+        return {name: float("-inf") for name in BAND_RANGES}
+
+    return {
+        name: 10.0 * np.log10(e / total) if e > 0 else float("-inf")
+        for name, e in energy.items()
+    }
+```
+
+**Algorithm / origin:** not a published algorithm — a direct
+application of Stage 3/5's `welch()`/`band_energy()`, converted to a
+dB-relative-to-total scale.
+
+**Purpose here:** the numbers behind tracklab's frequency-balance
+chart, and — per the 2026-09-05 decision in `CONCEPTS.md` — the same
+function used for both a user's own track and any reference track they
+choose to compare against.
+
+**Called from:** `tests/test_frequency_balance.py`,
+`tests/test_db.py`'s full-pipeline test; will be called by Stage 7's
+pipeline once it exists.
+
+**Logic:** `welch()` and `band_energy()` are exactly Stage 3/5's
+functions, unmodified. `total = sum(energy.values())` is the track's
+whole-signal energy. Each band's result is `10*log10(e / total)` —
+converting a power *ratio* to decibels, which is why every value is
+≤0dB (a ratio of a part to the whole is always ≤1, and `log10` of a
+value ≤1 is ≤0). The `e > 0` and `total <= 0` guards return `-inf`
+explicitly for genuinely silent bands/signals rather than letting
+`log10(0)` raise or produce a runtime warning.
+
+---
+
+### `Track` and `Features` — `backend/db/models.py`
+
+```python
+class Base(DeclarativeBase):
+    pass
+
+
+class Track(Base):
+    __tablename__ = "tracks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    filename: Mapped[str]
+    file_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    format: Mapped[str]
+    sample_rate: Mapped[int]
+    duration: Mapped[float]
+    is_lossy: Mapped[bool]
+    uploaded_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(timezone.utc)
+    )
+
+    features: Mapped["Features"] = relationship(
+        back_populates="track", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class Features(Base):
+    __tablename__ = "features"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    track_id: Mapped[int] = mapped_column(ForeignKey("tracks.id"), unique=True)
+
+    bpm: Mapped[float]
+    key: Mapped[str]
+    mode: Mapped[str]
+
+    lufs: Mapped[float]
+
+    mono_score: Mapped[float]
+    mono_worst_band: Mapped[str]
+
+    freq_sub_db: Mapped[float]
+    freq_bass_db: Mapped[float]
+    freq_low_mid_db: Mapped[float]
+    freq_mid_db: Mapped[float]
+    freq_high_db: Mapped[float]
+
+    track: Mapped["Track"] = relationship(back_populates="features")
+```
+
+**Algorithm / origin:** SQLAlchemy 2.0's declarative ORM style —
+`Mapped[T]` type hints double as both the Python attribute's type and
+the SQL column's inferred type.
+
+**Purpose here:** the only place tracklab's data model is defined —
+every stored track and its analysis results are instances of these two
+classes.
+
+**Called from:** `tests/test_db.py`; will be called by Stage 7's API
+layer once it exists.
+
+**Logic:** `Base` is the declarative base every mapped class inherits
+from — SQLAlchemy uses it to collect all table definitions into
+`Base.metadata` (what `session.py`'s `init_db()` calls
+`create_all()` on). Most fields are just `Mapped[float]`/`Mapped[str]`/
+`Mapped[bool]` with no explicit column configuration — SQLAlchemy
+infers the SQL type from the Python type. `file_hash` is the exception:
+`mapped_column(String(64), unique=True, index=True)` — `unique=True`
+enforces at the database level that no two tracks share a hash (the
+whole point of hashing for a cache), and `index=True` makes looking up
+a track by hash fast rather than a full table scan. `track_id: Mapped[int]
+= mapped_column(ForeignKey("tracks.id"), unique=True)` is what makes
+`features` a one-to-one relationship rather than one-to-many — a track
+can have at most one features row. The two `relationship()` calls on
+each side don't create columns; they tell the ORM how to navigate
+between already-related rows as Python attributes (`track.features`,
+implicitly `features.track` via `back_populates`).
+
+---
+
+### `session.py`
+
+```python
+DB_PATH = Path(__file__).parent.parent.parent / "tracklab.db"
+engine = create_engine(f"sqlite:///{DB_PATH}")
+
+SessionLocal = sessionmaker(bind=engine)
+
+
+def init_db() -> None:
+    Base.metadata.create_all(engine)
+```
+
+**Algorithm / origin:** SQLAlchemy's engine/session-factory pattern.
+
+**Purpose here:** the two things every other piece of database code
+needs — a way to get a session, and a way to make sure the tables
+exist.
+
+**Called from:** `tests/test_db.py` uses its own isolated in-memory
+engine instead (see below) rather than this module's real-file
+`engine`, so tests never touch actual data.
+
+**Logic:** `create_engine(f"sqlite:///{DB_PATH}")` doesn't open a
+connection immediately — it's a factory SQLAlchemy draws real
+connections from as needed. `sessionmaker(bind=engine)` is the "session
+factory" `STAGES.md` asks for: calling `SessionLocal()` produces a new
+`Session` bound to this engine, meant for one unit of work
+(`CONCEPTS.md` explains why sessions aren't shared). `init_db()` calls
+`Base.metadata.create_all(engine)` — every class that inherited from
+`Base` in `models.py` registered its table there at import time, so
+this one call creates both `tracks` and `features`, and is a safe
+no-op if they already exist.
+
+**A note on tests, since it's the same principle as every stage so
+far:** `tests/test_db.py` never imports `engine`/`SessionLocal` from
+this module at all — it builds its own `create_engine("sqlite:///:memory:")`
+per test, via a `pytest.fixture`. Same reasoning as Stage 2's synthetic
+audio fixtures: fully isolated, reproducible for a stranger cloning the
+repo, and never at risk of touching or corrupting the real
+`tracklab.db` file.
