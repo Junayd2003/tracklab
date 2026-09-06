@@ -961,9 +961,137 @@ its own, used for exactly one unit of work, then closed.
 
 ---
 
+## Stage 7 — FastAPI application, background pipeline, access gate
+
+### What we built
+
+`backend/main.py`: `POST /tracks` (upload, hash, queue analysis),
+`GET /tracks/{id}` (status/result), a shared-secret dependency on both.
+`backend/pipeline.py`: `analyse_and_store()`, the orchestration
+function tying Stages 3–6 together, run via FastAPI's `BackgroundTasks`.
+`backend/schemas.py`: Pydantic response models. `backend/db/models.py`
+gained a `status` field (`queued`/`running`/`complete`/`failed`) and
+made `sample_rate`/`duration` nullable. Covered by 17 integration tests
+in `tests/test_main.py`. Full annotated source:
+[`CODE_GUIDE.md` § Stage 7](CODE_GUIDE.md#stage-7--fastapi-application-background-pipeline-access-gate).
+
+### Why upload can't wait for analysis
+
+A five-minute track takes 10–30 seconds to analyse (`CLAUDE.md`'s own
+technical constraints). An HTTP client — a browser, `curl`, a mobile
+app — expects a response in a reasonable time, typically seconds; a
+web server or reverse proxy in front of one will often time out a
+request that runs much longer than that regardless of what the client
+would tolerate. FastAPI's `BackgroundTasks` (documented, cited below,
+as running "after returning a response") exists exactly for this
+shape of problem: `POST /tracks` does only the fast part synchronously
+— save the file, hash it, check the cache, create a `Track` row — and
+queues the actual decode-and-analyse work to run *after* the response
+has already been sent. The client gets a job id immediately and polls
+`GET /tracks/{id}` for the result, rather than the connection staying
+open for 30 seconds.
+
+One thing worth being precise about, confirmed directly rather than
+assumed: in tests, `TestClient` runs a queued background task
+synchronously, to completion, before `client.post(...)` even returns
+control to the test — verified with a `time.sleep()`-based probe before
+writing any real test. A *real* deployed server (`uvicorn`) does not
+do this — it genuinely sends the response first and only then runs the
+task, which is exactly why `GET /tracks/{id}` polling exists as a real
+feature and not just a testing artefact.
+
+### What Pydantic validates, concretely
+
+A `@dataclass` (Stage 2) documents a shape; it enforces nothing at
+runtime — you can construct one with a string where a float was
+declared and Python won't object. A Pydantic `BaseModel` (`schemas.py`)
+does enforce it: assigning a value that doesn't match the declared
+type raises a validation error at the moment FastAPI serialises the
+response, not silently passing through. Declaring
+`FeaturesResponse(bpm: float, key: str, ...)` explicitly, rather than
+returning a bare dict, means a bug that accidentally put the BPM value
+in the `key` field would fail loudly, at the API boundary, instead of
+shipping a subtly wrong response to whatever's on the other end.
+
+### CORS, briefly
+
+Browsers enforce a same-origin policy by default (MDN, cited below):
+a script served from one origin (scheme + domain + port) can't read
+responses from a different origin unless that server explicitly
+opts in via CORS headers. The Vite dev server (Stage 8) runs on
+`http://localhost:5173`; the API runs on a different port — different
+origin, as far as the browser is concerned, even on the same machine.
+`CORSMiddleware` with `allow_origins=["http://localhost:5173"]` is
+tracklab's explicit opt-in, without which the frontend's own `fetch()`
+calls to the API would be silently blocked by the browser, not the
+server.
+
+### The shared-secret gate, and a bug in how it failed
+
+Every route depends on `require_api_key`, matching the
+`decisions.md` (2026-08-23) rationale: the app binds to `0.0.0.0` so a
+phone on the same wifi can reach it, which also means anyone else on
+that network can. A single header check is proportionate to that threat
+model — not full authentication, deliberately.
+
+Worth documenting the bug this surfaced, same discipline as every prior
+stage: the first version used `Header(...)` (a *required* header).
+FastAPI validates required parameters before a route's own dependency
+function body ever runs, so a genuinely missing key failed FastAPI's
+own request validation and returned `422 Unprocessable Entity` — not
+`401 Unauthorized`, which is what a wrong key correctly returned. Two
+different failure reasons should not produce two different kinds of
+error for what is, to a caller, the same problem: "you're not
+authorised." Fixed by making the header optional at the parameter level
+(`Header(default=None)`) and checking for `None` explicitly inside the
+function, so both "missing" and "wrong" now consistently return 401.
+
+### A SQLite gotcha: in-memory databases are connection-scoped
+
+`tests/test_main.py`'s first version used a bare
+`create_engine("sqlite:///:memory:")` and failed with `no such table:
+tracks` — despite `Base.metadata.create_all()` having just run against
+that exact engine. SQLAlchemy's own documentation (cited below) states
+the reason plainly: a `:memory:` SQLite database exists only within the
+scope of a single underlying connection; two separate connections to
+the same `:memory:` URL get two separate, independently empty
+databases. `TestClient` dispatches requests through a different thread
+than the one that called `create_all()` (visible directly in the
+original traceback: `anyio/from_thread.py`), so by default each got its
+own connection, and its own empty database. The fix, straight from that
+same documentation: `poolclass=StaticPool` forces every session onto
+one single shared connection regardless of thread, with
+`connect_args={"check_same_thread": False}` telling SQLite's driver not
+to enforce its own same-thread restriction on top. The same
+documentation is explicit that this combination is appropriate for
+serialised, single-threaded test access — not a general concurrency
+solution — which is exactly what a test suite is.
+
+### An overridable session factory, for a problem `dependency_overrides` doesn't reach
+
+FastAPI's usual testing mechanism, `app.dependency_overrides`, only
+intercepts things resolved through `Depends()`. `analyse_and_store()`
+runs inside a background task, called as a plain function — it was
+never going through FastAPI's dependency injection to begin with, so
+overriding `get_db` alone would leave it still writing to the real
+`tracklab.db` file during tests. `main.py`'s `session_factory` module
+attribute, read fresh at call time by both `get_db()` and the value
+threaded into `background_tasks.add_task(analyse_and_store, ...,
+session_factory)`, closes that gap with one override point instead of
+two separate ones (`decisions.md`, 2026-09-06).
+
+### References
+
+- [FastAPI: Background Tasks](https://fastapi.tiangolo.com/tutorial/background-tasks/)
+- [CORS — MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
+- [Pydantic documentation](https://docs.pydantic.dev/latest/) (already cited, Stage 2 — now actually in use)
+- [SQLAlchemy: Using a Memory Database in Multiple Threads](https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#using-a-memory-database-in-multiple-threads)
+
+---
+
 ## What's next
 
-Stage 7 (FastAPI application, background job pipeline, the
-shared-secret access gate) will get its own section here once it
-exists. Not written yet, on purpose — this document tracks the code,
-it doesn't get ahead of it.
+Stage 8 (minimal dashboard, README rewritten as a technical report,
+freeze and `v1.0` tag) will get its own section here once it exists.
+Not written yet, on purpose — this document tracks the code, it
+doesn't get ahead of it.

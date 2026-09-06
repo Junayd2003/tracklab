@@ -879,3 +879,219 @@ per test, via a `pytest.fixture`. Same reasoning as Stage 2's synthetic
 audio fixtures: fully isolated, reproducible for a stranger cloning the
 repo, and never at risk of touching or corrupting the real
 `tracklab.db` file.
+
+---
+
+## Stage 7 — FastAPI application, background pipeline, access gate
+
+Theory: [`CONCEPTS.md` § Stage 7](CONCEPTS.md#stage-7--fastapi-application-background-pipeline-access-gate).
+
+### `analyse_and_store()` — `backend/pipeline.py`
+
+```python
+def analyse_and_store(track_id: int, path: Path, session_factory=SessionLocal) -> None:
+    with session_factory() as session:
+        track = session.get(Track, track_id)
+        track.status = "running"
+        session.commit()
+
+        try:
+            audio = load_audio(path)
+
+            bpm = detect_bpm(audio.mono, audio.sample_rate)
+            key, mode = detect_key(audio.mono, audio.sample_rate)
+            lufs = integrated_loudness(audio.stereo, audio.sample_rate)
+            mono_report = mono_compatibility(audio.stereo, audio.sample_rate)
+            balance = frequency_balance(audio.mono, audio.sample_rate)
+
+            track.sample_rate = audio.sample_rate
+            track.duration = audio.duration
+            track.features = Features(
+                bpm=bpm,
+                key=key,
+                mode=mode,
+                lufs=lufs,
+                mono_score=mono_report.score,
+                mono_worst_band=mono_report.worst_band,
+                freq_sub_db=balance["sub"],
+                freq_bass_db=balance["bass"],
+                freq_low_mid_db=balance["low_mid"],
+                freq_mid_db=balance["mid"],
+                freq_high_db=balance["high"],
+            )
+            track.status = "complete"
+
+        except Exception as exc:
+            track.status = "failed"
+            track.error_message = str(exc)
+
+        session.commit()
+```
+
+**Algorithm / origin:** not DSP — the orchestration function first
+sketched in conversation before Stage 6 existed, now real: the one
+place every audio module (Stages 2–6) is called together.
+
+**Purpose here:** turns "a file on disk" into "a stored, queryable
+analysis" — the entire content of what a background task does.
+
+**Called from:** `main.py`'s `upload_track()`, via
+`background_tasks.add_task()`; `tests/test_main.py` indirectly, through
+the API.
+
+**Logic:** opens its own session (why: `CONCEPTS.md`, Stage 6 — a
+Session is one unit of work, and the request's own session is long
+closed by the time this runs). Sets `status = "running"` and commits
+immediately, so a client polling `GET /tracks/{id}` mid-analysis sees
+that, not a stale `"queued"`. The `try` block runs Stages 2–6 in
+sequence — `load_audio` first, since every other function needs its
+output — and on success, attaches a new `Features` row and flips
+`status` to `"complete"`. The `except Exception` catches *any* failure
+(a corrupt file, an unsupported format slipping past validation,
+anything) and records it as `status = "failed"` with the exception
+message, rather than letting the background task crash silently with
+no trace of what happened. `session_factory` defaults to the real
+`SessionLocal` but is a parameter, not a hardcoded import use — see
+`decisions.md`, 2026-09-06, and `main.py` below.
+
+---
+
+### `main.py` — the FastAPI application
+
+```python
+session_factory = SessionLocal
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    yield
+
+
+app = FastAPI(title="tracklab", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    if x_api_key is None or x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+def get_db():
+    with session_factory() as session:
+        yield session
+
+
+@app.post("/tracks", response_model=UploadResponse, dependencies=[Depends(require_api_key)])
+def upload_track(
+    file: UploadFile, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+) -> UploadResponse:
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = UPLOAD_DIR / file.filename
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    file_hash = hash_file(dest)
+
+    existing = db.query(Track).filter_by(file_hash=file_hash).first()
+    if existing is not None:
+        dest.unlink()
+        return UploadResponse(id=existing.id, status=existing.status)
+
+    track = Track(
+        filename=file.filename,
+        file_hash=file_hash,
+        format=dest.suffix.lower(),
+        is_lossy=is_lossy(dest),
+        status="queued",
+    )
+    db.add(track)
+    db.commit()
+
+    background_tasks.add_task(analyse_and_store, track.id, dest, session_factory)
+
+    return UploadResponse(id=track.id, status=track.status)
+
+
+@app.get("/tracks/{track_id}", response_model=TrackResponse, dependencies=[Depends(require_api_key)])
+def get_track(track_id: int, db: Session = Depends(get_db)) -> TrackResponse:
+    track = db.get(Track, track_id)
+    if track is None:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    features_response = None
+    if track.status == "complete" and track.features is not None:
+        f = track.features
+        features_response = FeaturesResponse(
+            bpm=f.bpm,
+            key=f.key,
+            mode=f.mode,
+            lufs=f.lufs,
+            mono_score=f.mono_score,
+            mono_worst_band=f.mono_worst_band,
+            frequency_balance=FrequencyBalanceResponse(
+                sub=f.freq_sub_db,
+                bass=f.freq_bass_db,
+                low_mid=f.freq_low_mid_db,
+                mid=f.freq_mid_db,
+                high=f.freq_high_db,
+            ),
+        )
+
+    return TrackResponse(
+        id=track.id,
+        filename=track.filename,
+        status=track.status,
+        error=track.error_message,
+        features=features_response,
+    )
+```
+
+**Algorithm / origin:** FastAPI's own patterns throughout — dependency
+injection (`Depends`), lifespan context managers, `BackgroundTasks`.
+
+**Purpose here:** the only HTTP-facing code in the whole project —
+everything below it (Stages 2–6) is pure Python with no knowledge that
+HTTP exists.
+
+**Called from:** run directly by `uvicorn backend.main:app`; exercised
+in tests via `TestClient(main.app)`.
+
+**Logic:**
+
+- `session_factory = SessionLocal` — a plain, reassignable name, not
+  used directly inline elsewhere, precisely so tests can replace it
+  (`decisions.md`, 2026-09-06).
+- `lifespan` replaces the older, now-deprecated `@app.on_event("startup")`
+  — an `async def` generator function: everything before `yield` runs
+  at startup (creating tables, ensuring the upload directory exists),
+  everything after would run at shutdown (nothing needed here).
+- `require_api_key` — a dependency with no return value, used purely
+  for its side effect of raising `HTTPException` when the check fails;
+  attached to both routes via `dependencies=[Depends(require_api_key)]`
+  rather than as a parameter each handler has to remember to check.
+- `get_db` is itself a *generator* (`yield`, not `return`) — FastAPI
+  recognises this pattern specifically to guarantee the session's
+  `with` block exits (closing it) once the request finishes, success
+  or failure, without the handler needing its own `try`/`finally`.
+- `upload_track`: writes the upload to disk first (needed before it
+  can even be hashed), hashes it, and checks for an existing `Track`
+  with that hash *before* doing anything else — the cache-hit path
+  deletes the just-written duplicate and returns immediately, doing no
+  further work. Only on a genuine new file does it create a `Track`
+  row (status `"queued"`, no `sample_rate`/`duration` yet) and queue
+  `analyse_and_store` — note the explicit `session_factory` passed as
+  its third argument, the same reassignable name `get_db` reads,
+  keeping both paths in sync under one override.
+- `get_track`: builds the nested `FeaturesResponse`/`FrequencyBalanceResponse`
+  only when `status == "complete"` and a `Features` row actually
+  exists — every other status returns `features: null`, which the
+  response model's `features: FeaturesResponse | None = None` default
+  makes valid rather than a validation error.

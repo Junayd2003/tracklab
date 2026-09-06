@@ -24,9 +24,16 @@ _PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B
 
 
 def detect_bpm(mono: np.ndarray, fs: int) -> float:
-    """Estimate tempo in BPM via librosa's beat tracker."""
+    """Estimate tempo in BPM via librosa's beat tracker.
+
+    `librosa.beat.beat_track`'s `tempo` return isn't a consistent
+    shape: confirmed empirically to be a 1-element NumPy array on
+    rhythmically rich audio, but a plain scalar float on a signal with
+    no onset structure (e.g. a pure sustained tone) -- `np.atleast_1d`
+    handles either case safely before extracting the scalar.
+    """
     tempo, _ = librosa.beat.beat_track(y=mono, sr=fs)
-    return float(tempo[0])
+    return float(np.atleast_1d(tempo)[0])
 
 
 def detect_key(mono: np.ndarray, fs: int) -> tuple[str, str]:

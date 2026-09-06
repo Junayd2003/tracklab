@@ -28,14 +28,29 @@ class Track(Base):
     filename: Mapped[str]
     file_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     format: Mapped[str]
-    sample_rate: Mapped[int]
-    duration: Mapped[float]
     is_lossy: Mapped[bool]
     uploaded_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(timezone.utc)
     )
 
-    features: Mapped["Features"] = relationship(
+    # Only known once the file is actually decoded -- format and
+    # is_lossy come free from the filename/extension, but sample_rate
+    # and duration need librosa.load() to run, which is exactly the
+    # decode work Stage 7 keeps out of the request cycle (see main.py).
+    # Set by the background task once analysis completes.
+    sample_rate: Mapped[int | None] = mapped_column(default=None)
+    duration: Mapped[float | None] = mapped_column(default=None)
+
+    # Stage 7: a Track row is created immediately on upload, before
+    # analysis runs -- "queued" | "running" | "complete" | "failed".
+    # error_message is set only when status == "failed".
+    status: Mapped[str] = mapped_column(default="queued")
+    error_message: Mapped[str | None] = mapped_column(default=None)
+
+    # No related Features row until analysis completes, hence Optional
+    # -- uselist=False already makes this a single object (or None),
+    # not a list; the type hint just makes the "or None" explicit.
+    features: Mapped["Features | None"] = relationship(
         back_populates="track", uselist=False, cascade="all, delete-orphan"
     )
 

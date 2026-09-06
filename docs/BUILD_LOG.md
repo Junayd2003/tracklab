@@ -860,3 +860,97 @@ if a future session starts fresh.
   shared-secret access gate. First new subsystem of this stretch
   (HTTP, background tasks) -- still moving at the faster Stage 6-8
   pace agreed this session.
+
+---
+
+## Session 11 — 2026-09-06 — Stage 7: FastAPI, background pipeline, access gate
+
+**Done**
+- `backend/pipeline.py`: `analyse_and_store()`, the orchestration
+  function tying Stages 2-6 together, run as a FastAPI background task
+- `backend/main.py`: `POST /tracks` (upload, hash, cache check, queue
+  analysis), `GET /tracks/{id}` (status/result), a shared-secret
+  dependency on both, CORS for the Vite dev server, lifespan-based
+  startup (not the deprecated `@app.on_event`)
+- `backend/schemas.py`: Pydantic response models
+- `backend/db/models.py`: added `status`/`error_message` to `Track`;
+  made `sample_rate`/`duration` nullable, since populating them
+  requires the decode work Stage 7 explicitly keeps out of the request
+  cycle -- only extension-based `format`/`is_lossy` are known at
+  upload time
+- Empirically verified (not assumed) that `TestClient` runs
+  `BackgroundTasks` synchronously within the request call, via a
+  `time.sleep()`-based probe, before designing the test suite around it
+- Real end-to-end smoke test via actual `uvicorn` + `curl`: server
+  started and shut down cleanly per its own logs, but `curl` couldn't
+  connect (status `000`) -- a sandbox network restriction on this tool,
+  not an application bug. `TestClient`'s 61 (now 78) passing tests,
+  including full integration flows, already validate real behaviour
+  via FastAPI's own standard, idiomatic testing approach
+- Two real bugs found while writing the integration tests, both fixed:
+  a required `Header(...)` returning 422 for a missing API key instead
+  of 401 (inconsistent with a wrong key, which correctly gave 401);
+  `librosa.beat.beat_track`'s `tempo` return type not being consistent
+  (array on rhythmic audio, plain scalar float on a pure sustained
+  tone with no onset structure) -- `tempo[0]` crashed on the scalar
+  case, found by a synthetic edge-case test fixture, same pattern as
+  Stage 3 and 5's bugs
+- One real SQLite/SQLAlchemy gotcha found and fixed: a bare
+  `sqlite:///:memory:` engine gives each thread its own, separately
+  empty, database, and `TestClient` dispatches through a different
+  thread than the one that creates the tables. Fixed with
+  `StaticPool` + `check_same_thread=False`, per SQLAlchemy's own
+  documented recommendation for exactly this situation
+- 17 new integration tests (`tests/test_main.py`). Full suite: 61
+  passing, no regressions
+- `docs/CONCEPTS.md` and `docs/CODE_GUIDE.md` Stage 7 sections written;
+  PDFs regenerated
+
+**Files touched**
+- `backend/main.py`, `backend/pipeline.py`, `backend/schemas.py` — new
+- `backend/db/models.py` — `status`/`error_message` added,
+  `sample_rate`/`duration` made nullable
+- `backend/audio/intelligence.py` — `detect_bpm` fixed for
+  inconsistent `tempo` return type
+- `tests/test_main.py` — new
+- `.env` (real secret, gitignored), `.env.example` — new
+- `docs/STAGES.md` — Stage 7 marked done
+- `docs/CONCEPTS.md`, `docs/CODE_GUIDE.md` — Stage 7 sections added
+- (vault) `decisions.md` — four new entries, 2026-09-06
+
+**Decisions**
+- Decode work deferred to the background task, not done at upload time
+  (vault `decisions.md`)
+- Overridable `session_factory` module attribute, since
+  `app.dependency_overrides` alone doesn't reach a background task
+  called outside FastAPI's dependency injection (vault `decisions.md`)
+- Two bug fixes (API key status code, BPM return type) logged together
+  (vault `decisions.md`)
+
+**Concepts explained**
+- Why background tasks exist and how `TestClient` vs a real server
+  differ in when they run; what Pydantic validates that a dataclass
+  doesn't; CORS and the same-origin policy; the SQLite in-memory
+  connection-scoping gotcha (all in `CONCEPTS.md` -- not quizzed live,
+  per the Stage 6-8 pacing note)
+
+**In progress / not finished**
+- Nothing mid-built. Stage 7 is complete.
+
+**Open questions**
+- The real-server `curl` connectivity issue (sandbox network
+  restriction, not an app bug) means a genuinely manual end-to-end
+  check (running `uvicorn` and hitting it from outside this sandboxed
+  tool) hasn't happened yet -- worth doing once, in a normal terminal,
+  before Stage 8 builds a frontend against this API.
+
+**Exit criteria met?**
+- Yes. Three tracks uploaded in quick succession all complete, status
+  visible throughout. Missing/wrong API key both correctly rejected
+  (401). CI itself remains deferred (Stage 1's open item), so "passes
+  in CI" is met as "passes locally," not literally in a CI pipeline.
+
+**Next session starts with**
+- Stage 8: minimal dashboard (Vite React), README rewritten as a
+  technical report, test suite runnable in one command, freeze and
+  tag `v1.0`. Last stage before the 28 September deadline.

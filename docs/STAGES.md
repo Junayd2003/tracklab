@@ -261,10 +261,13 @@ not baked into the backend.
   be over-built as if it needed to be — there is one user.
 
 **Exit criteria**
-Upload three tracks in quick succession via `/docs`. All three
-complete, status transitions are visible throughout, and the
-integration test suite passes in CI. A request without the correct API
-key is rejected; one with it succeeds.
+*(Done, 2026-09-06.)* Three tracks uploaded in quick succession all
+complete, status visible throughout
+(`test_three_uploads_in_quick_succession_all_complete`). A request
+without the correct API key is rejected (401); one with it succeeds.
+17 integration tests passing; CI itself still deferred (Stage 1's
+open item — no GitHub remote yet), so "running in CI" isn't met
+literally, only "passing locally."
 
 ---
 
