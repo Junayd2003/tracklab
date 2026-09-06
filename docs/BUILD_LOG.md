@@ -1038,3 +1038,85 @@ if a future session starts fresh.
   theory, syntax, code logic, and system design across everything
   built during the Stage 6-8 stretch, before Tier 2 planning begins in
   mid-October.
+
+---
+
+## Session 13 — 2026-09-06 — Frontend polish; LaTeX notation in CONCEPTS.md
+
+**Done**
+- Frontend visual polish pass (custom file picker, icon-badged metric
+  cards, a colour-coded pill for the mono score, a spinner for the
+  loading state, fixed chart Y-axis headroom) — verified visually via
+  the Playwright driver against the live dev servers, committed
+  separately before the documentation work below
+- Actually ran and drove the full application for the first time:
+  built a one-off Playwright driver (`chromium-cli` wasn't available)
+  pointed at the system Chrome install, launched both servers, and
+  drove a real upload through to completion in a real browser. Numbers
+  matched exactly what direct testing produced on the same file weeks
+  earlier — a genuine end-to-end consistency check across the whole
+  chain, not just each piece in isolation
+- Added real LaTeX notation to `CONCEPTS.md`: the continuous and
+  discrete Fourier transform (a new subsection -- previously discussed
+  the FFT constantly without ever writing the transform down), the
+  Nyquist sampling condition and aliasing formula, the periodic Hann
+  window and full windowed-periodogram/Welch-averaging formulas, the
+  general biquad transfer function, the LUFS formula, the sum-to-product
+  identity and energy-loss formula for mono compatibility, and the
+  Pearson correlation coefficient behind Krumhansl-Schmuckler key
+  detection. Kept deliberately shallow per the ask ("do not delve too
+  deep") -- one or two equations per concept, with citations for
+  anyone wanting the full derivation (new references: Fourier
+  transform, DFT, and Cooley-Tukey FFT algorithm on Wikipedia; Pearson
+  correlation coefficient)
+- Solved the real problem this created: `xhtml2pdf` has no LaTeX
+  rendering at all. `build_pdf.py` now preprocesses `$$...$$` blocks,
+  rendering each to a PNG via matplotlib's `mathtext` engine (no full
+  LaTeX install available or needed) and embedding it as a base64 data
+  URI, while leaving the `.md` source's real LaTeX untouched for
+  GitHub/editor rendering
+- Installed `poppler` (`brew install poppler`) to actually render PDF
+  pages for visual inspection, rather than only extracting text --
+  this immediately surfaced a real, previously-undetected bug: several
+  pre-existing Unicode superscript characters (`10⁻⁴`, `10⁻⁷`, `10⁻¹⁵`,
+  etc.) rendered as missing-glyph boxes in the PDF's font, while plain
+  `²` did not. Fixed by switching those to `<sup>` HTML tags, which
+  use ordinary digit glyphs. Also fixed a `mathtext`-specific
+  positioning bug in the PSD formula (`\left|...\right|^2` mis-places
+  the trailing exponent) by restructuring it as one full fraction
+  instead
+- Full suite still 61/61 (no backend code touched this session)
+
+**Files touched**
+- `frontend/src/App.css`, `App.jsx`, `index.css` — visual polish
+- `docs/CONCEPTS.md` — LaTeX equations added throughout, two rendering
+  bugs fixed, references added
+- `docs/build_pdf.py` — LaTeX-to-image preprocessing step
+- `docs/requirements-docs.txt` — added `matplotlib`
+- (vault) `decisions.md` — two new entries, 2026-09-06
+
+**Decisions**
+- Shared-secret key deliberately embedded in the frontend bundle
+  (vault `decisions.md`, logged same day as the polish work)
+- LaTeX in the `.md` source, rendered to images for the PDF via
+  matplotlib's `mathtext`, not a full LaTeX toolchain (vault
+  `decisions.md`)
+
+**Concepts explained**
+- None new for the project's own theory -- this session added
+  notation and fixed rendering, it didn't introduce new DSP concepts
+
+**In progress / not finished**
+- Nothing mid-built.
+
+**Open questions**
+- None blocking.
+
+**Exit criteria met?**
+- N/A -- post-freeze polish and documentation session, no stage exit
+  criteria targeted (Tier 1 already frozen at `v1.0`).
+
+**Next session starts with**
+- Nothing scheduled. The post-freeze catch-up session (theory, syntax,
+  code logic, system design) remains the recommended next step
+  whenever the user wants it, before Tier 2 planning in mid-October.

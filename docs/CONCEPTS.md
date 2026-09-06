@@ -285,24 +285,32 @@ This is worth stating precisely, since it's the mathematical bedrock
 under every `sr=44100` in the codebase. **A signal sampled at rate
 `fs` can be perfectly reconstructed from its samples if and only if it
 contains no frequency content at or above `fs / 2`** (the *Nyquist
-frequency*) — the theorem is attributed jointly to Harry Nyquist's 1928
-analysis of telegraph signalling rate and Claude Shannon's 1949
-formalisation of it for general communication, though Wikipedia's
-account (cited below) notes it was also derived independently by E.T.
-Whittaker in 1915 and Vladimir Kotelnikov in 1933, one of those results
-several people reached separately before it had one settled name.
-Sample a signal that *does* have higher-frequency content, and those
-frequencies don't just vanish — they fold back and appear as false,
-lower frequencies in the sampled signal.
+frequency*):
+
+$$f_s > 2 f_{max}$$
+
+The theorem is attributed jointly to Harry Nyquist's 1928 analysis of
+telegraph signalling rate and Claude Shannon's 1949 formalisation of it
+for general communication, though Wikipedia's account (cited below)
+notes it was also derived independently by E.T. Whittaker in 1915 and
+Vladimir Kotelnikov in 1933, one of those results several people
+reached separately before it had one settled name. Sample a signal
+that *does* have higher-frequency content, and those frequencies don't
+just vanish — they fold back and appear at a false, lower frequency:
+
+$$f_{alias} = |f - n f_s|$$
+
+for whichever integer `n` brings the result into the range
+`[0, f_s/2]`.
 
 **Concretely**: at `fs = 44100`, the Nyquist frequency is `22050Hz`. A
 genuine 30kHz tone, sampled at 44.1kHz without first being filtered
-out, doesn't disappear — it reappears as a false tone at
-`44100 − 30000 = 14100Hz`, sitting well inside the audible range and
-indistinguishable from a real 14.1kHz signal in the sampled data. That's
-aliasing, and it's not fixable after the fact; the information needed
-to tell the alias from a real low frequency is gone the moment both
-would produce identical samples.
+out, doesn't disappear — by the formula above (`n = 1`), it reappears
+as a false tone at `|30000 − 44100| = 14100Hz`, sitting well inside the
+audible range and indistinguishable from a real 14.1kHz signal in the
+sampled data. That's aliasing, and it's not fixable after the fact; the
+information needed to tell the alias from a real low frequency is gone
+the moment both would produce identical samples.
 
 This is why `load_audio()` resampling to 44.1kHz is not simply
 "changing a number that says how many samples per second":
@@ -457,6 +465,36 @@ tying them together — segmenting, windowing, and averaging. Covered by
 "close." Full annotated source:
 [`CODE_GUIDE.md` § Stage 3](CODE_GUIDE.md#stage-3--backendaudiospectralpy).
 
+### The Fourier transform, briefly
+
+Everything in this stage rests on one idea worth stating explicitly,
+since the rest of the document uses it constantly without ever writing
+it down: the Fourier transform decomposes a signal into the
+frequencies that make it up. For a continuous signal `x(t)`:
+
+$$X(f) = \int_{-\infty}^{\infty} x(t)\, e^{-i2\pi ft}\, dt$$
+
+Audio in this codebase is never continuous, though — it's a finite
+sequence of samples — so what actually gets computed is the **discrete
+Fourier transform** (DFT), the same idea applied to `N` samples instead
+of a continuous function:
+
+$$X_k = \sum_{n=0}^{N-1} x_n\, e^{-i2\pi kn/N}$$
+
+`np.fft.rfft`, used throughout `spectral.py`, computes exactly this
+(the "r" is for "real-valued input," see `_windowed_periodogram`'s
+one-sided-spectrum handling below) — not via the `O(N^2)` sum above,
+but via the Fast Fourier Transform algorithm, which computes the
+identical result in `O(N log N)` by recursively exploiting symmetries
+in the sum. That algorithmic difference is what makes Welch's whole
+approach — many small transforms rather than one huge one — practical
+at all; the FFT algorithm itself isn't reimplemented here, and isn't
+needed to be, in the same way `scipy.signal.lfilter` in Stage 4 is a
+primitive this project builds on rather than reimplements. Going
+further into the FFT algorithm itself is genuinely interesting but
+outside this document's depth — the Wikipedia article on the
+Cooley–Tukey algorithm (cited below) is a good next step.
+
 ### Why a single periodogram isn't good enough
 
 A periodogram — the squared magnitude of a signal's FFT — is an
@@ -520,21 +558,37 @@ shape error, in a PSD estimate.
 
 That's precisely what happened: the first full comparison between the
 from-scratch `welch()` and `scipy.signal.welch()` showed a consistent
-`~2×10⁻⁴` relative error — small, but far above the `~10⁻⁷`
-floating-point noise already established as the honest baseline from
+~2×10<sup>-4</sup> relative error — small, but far above the
+~10<sup>-7</sup> floating-point noise already established as the honest baseline from
 Stage 2's single-segment check. A *consistent* discrepancy of a
 specific, small size — the same at every frequency, not random — is
 the fingerprint of a scale or normalisation mismatch, not a logic
 error, and worth recognising as such before ever opening the code to
 look for a bug. Confirming `np.hanning()` against
 `scipy.signal.get_window('hann', N)` directly showed they were
-different windows; replacing it with the periodic formula
-(`0.5 - 0.5*cos(2*pi*n/N)` — note dividing by `N`, not `N-1`) brought
-agreement to `~10⁻¹⁵`, true machine precision.
+different windows; replacing it with the periodic formula — note
+dividing by `N`, not `N-1`, the entire difference from the symmetric
+version —
+
+$$w[n] = 0.5 - 0.5\cos\!\left(\frac{2\pi n}{N}\right)$$
+
+brought agreement to ~10<sup>-15</sup>, true machine precision.
 
 ### PSD scaling and the one-sided spectrum
 
-Two further deliberate scaling choices inside `_windowed_periodogram`:
+Putting the last few sections together, one segment's windowed
+periodogram — the quantity `_windowed_periodogram()` actually computes —
+is:
+
+$$\hat{P}(f) = \frac{\left|\sum_{n=0}^{N-1} w[n]\, x[n]\, e^{-i2\pi fn/f_s}\right|^2}{f_s \sum_n w[n]^2}$$
+
+and Welch's estimate is the average of `K` such periodograms, one per
+segment:
+
+$$\hat{P}_{\text{Welch}}(f) = \frac{1}{K} \sum_{k=1}^{K} \hat{P}_k(f)$$
+
+— the averaging step from "Welch's method" above, written out. Two
+further deliberate scaling choices inside `_windowed_periodogram`:
 
 - Dividing by `fs * sum(window**2)`: dividing by `fs` converts "power
   per sample" into "power per Hz" — a density, comparable across
@@ -559,6 +613,9 @@ and reporting the gap as a bug.
 
 ### References
 
+- [Fourier transform — Wikipedia](https://en.wikipedia.org/wiki/Fourier_transform) — the continuous definition
+- [Discrete Fourier transform — Wikipedia](https://en.wikipedia.org/wiki/Discrete_Fourier_transform) — the finite-sum version actually computed here
+- [Cooley–Tukey FFT algorithm — Wikipedia](https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm) — how the DFT is actually computed in `O(N log N)`, not the `O(N²)` sum directly; not covered in depth in this document on purpose
 - Welch, P.D. (1967). [The Use of Fast Fourier Transform for the Estimation of Power Spectra: A Method Based on Time Averaging Over Short, Modified Periodograms](https://doi.org/10.1109/TAU.1967.1161901). *IEEE Transactions on Audio and Electroacoustics*, 15(2), 70–73. — the original paper introducing the method this stage implements; DOI resolves to IEEE Xplore
 - [`scipy.signal.welch` documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.welch.html) — confirms the periodic Hann default and `detrend='constant'` default
 - [`scipy.signal.get_window` documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.get_window.html) — the `fftbins` parameter and periodic vs symmetric windows
@@ -616,6 +673,19 @@ public "RBJ Audio EQ Cookbook" formulas (the same reference
   sub-bass content contributes less to perceived loudness than its raw
   energy would suggest, so it's weighted down.
 
+A **biquad** is a second-order digital filter — its output depends on
+the two most recent input *and* output samples, no further back than
+that. Every biquad, regardless of what it's tuned to do, has the same
+general shape (a *transfer function*, in the z-domain):
+
+$$H(z) = \frac{b_0 + b_1 z^{-1} + b_2 z^{-2}}{a_0 + a_1 z^{-1} + a_2 z^{-2}}$$
+
+What makes a biquad a *high-shelf* versus a *high-pass* versus anything
+else is purely the five coefficients (`b0, b1, b2, a0, a1, a2`) plugged
+into that same shape — `_high_shelf_coefficients()` and
+`_high_pass_coefficients()` compute exactly those, from the RBJ
+formulas, for K-weighting's two specific filters.
+
 Deriving the filter *coefficients* from these formulas, and building
 the two-stage gating algorithm around them, is the from-scratch work.
 Applying an already-derived biquad via `scipy.signal.lfilter` is an
@@ -654,10 +724,16 @@ gates are then applied before averaging:
   literally silent.
 
 The final loudness is the mean-square power of only the blocks that
-survive both gates, converted to LUFS via a fixed calibration constant
-(`−0.691`) that the ITU-R standard specifies directly as part of what
-"LUFS" is defined to mean — not something derived from first
-principles inside this codebase.
+survive both gates, converted to LUFS via the standard's own formula:
+
+$$L_K = -0.691 + 10\log_{10}\left(\sum_i G_i \overline{z_i}\right)$$
+
+— summing the gated, K-weighted mean-square power `z_i` of each
+channel `i` (each weighted by a per-channel gain `G_i`, 1.0 for both
+channels in tracklab's stereo case), converting to a logarithmic scale,
+then applying `−0.691`, a fixed calibration constant the ITU-R standard
+specifies directly as part of what "LUFS" is defined to mean — not
+something derived from first principles inside this codebase.
 
 ### Checking the exit criteria were achievable before writing any code
 
@@ -751,16 +827,17 @@ For two equal-amplitude sine waves at frequency `f` with phase
 difference `φ` between them, a standard trigonometric identity
 (sum-to-product) gives:
 
-```
-sin(θ) + sin(θ + φ) = 2·cos(φ/2)·sin(θ + φ/2)
-```
+$$\sin\theta + \sin(\theta+\varphi) = 2\cos\!\left(\frac{\varphi}{2}\right)\sin\!\left(\theta+\frac{\varphi}{2}\right)$$
 
 Averaging (not just summing) the two channels — the same convention
 `load_audio()` uses for `mono` — divides this by 2, giving a combined
 amplitude of `cos(φ/2)` times the original amplitude. Since energy is
 proportional to amplitude squared, the **fraction of energy retained**
-after mono-summing is `cos²(φ/2)`, and the **fraction lost** is
-`sin²(φ/2)`. Three checkpoints worth having memorised:
+after mono-summing is `cos²(φ/2)`, and the **fraction lost** is:
+
+$$\text{loss}(\varphi) = \sin^2\!\left(\frac{\varphi}{2}\right)$$
+
+Three checkpoints worth having memorised:
 
 - `φ = 0` (in phase): `sin²(0) = 0` — nothing lost, perfect
   reinforcement.
@@ -803,15 +880,15 @@ wrong, and wrong in a way worth understanding rather than just fixing.
 The cause: Stage 3's Hann windowing reduces spectral leakage but
 doesn't eliminate it — a pure tone still contributes a tiny, non-zero
 amount of energy to every frequency bin, just many orders of magnitude
-smaller than its true peak (measured here: ~`10⁻¹⁴` in the "sub" band
-against ~`0.5` in "mid", a fourteen-orders-of-magnitude gap). That
+smaller than its true peak (measured here: ~10<sup>-14</sup> in the
+"sub" band against ~`0.5` in "mid", a fourteen-orders-of-magnitude gap). That
 leaked energy isn't random noise — it's a scaled echo of the real
 tone, carrying the *same* phase relationship between channels as the
 tone itself. So a fully-inverted tone's leakage into "sub" shows the
 same ~100% loss fraction as the real cancellation in "mid," even
 though "sub" contains no meaningful signal at all. The fix: a band's
 loss fraction is only reported if that band holds a meaningful share
-of the signal's *total* energy (`>10⁻⁶` of it); below that, it's
+of the signal's *total* energy (>10<sup>-6</sup> of it); below that, it's
 treated as noise, not a finding. The general lesson: a measurement
 computed from negligible data is not a small version of the truth, it
 can be an arbitrary, misleading number that happens to look plausible.
@@ -880,11 +957,18 @@ most like? Krumhansl and Kessler's 1982 experiments (cited below) had
 listeners rate, on a scale, how well each of the 12 chromatic pitches
 fit after hearing a musical context establishing a key — the tonic
 scored highest, the fifth and third scored next, and so on, producing
-one 12-number "profile" for major and one for minor. Correlating a
-track's chroma vector against all 24 rotations of these two profiles
-(one rotation per possible tonic) and taking the best match gives the
-detected key and mode — implemented in `detect_key()` via
-`np.roll()` to generate each rotation and `np.corrcoef()` to score it.
+one 12-number "profile" for major and one for minor. "Correlating"
+here means the standard Pearson correlation coefficient — the same
+general-purpose measure of how closely two sequences of numbers move
+together used all over statistics, not something specific to music:
+
+$$r = \frac{\sum_i (x_i-\bar{x})(y_i-\bar{y})}{\sqrt{\sum_i (x_i-\bar{x})^2}\sqrt{\sum_i(y_i-\bar{y})^2}}$$
+
+Computing `r` between a track's chroma vector and all 24 rotations of
+the two profiles (one rotation per possible tonic) and taking the best
+match gives the detected key and mode — implemented in `detect_key()`
+via `np.roll()` to generate each rotation and `np.corrcoef()` to
+compute exactly this `r` for each one.
 
 **Where it fails, observed directly**: on a track labelled C minor,
 the algorithm detected G minor — not a bug, but the textbook
@@ -954,6 +1038,7 @@ its own, used for exactly one unit of work, then closed.
 ### References
 
 - [`librosa.beat.beat_track` documentation](https://librosa.org/doc/0.11.0/generated/librosa.beat.beat_track.html)
+- [Pearson correlation coefficient — Wikipedia](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient) — the general statistical measure `np.corrcoef` computes, not something specific to music
 - Krumhansl, C. L., & Kessler, E. J. (1982). [Tracing the dynamic changes in perceived tonal organization in a spatial representation of musical keys](https://doi.org/10.1037/0033-295X.89.4.334). *Psychological Review*, 89(4), 334–368.
 - [Understanding Mastering EQ: Balancing the Spectrum — masteringthemix.com](https://www.masteringthemix.com/blogs/learn/understanding-mastering-eq-balancing-the-spectrum) — states that fixed frequency targets are the wrong approach; recommends comparison against chosen reference tracks instead
 - [Object–relational mapping — Wikipedia](https://en.wikipedia.org/wiki/Object%E2%80%93relational_mapping)

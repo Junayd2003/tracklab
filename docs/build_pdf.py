@@ -13,9 +13,16 @@ limitation. The .md files are the primary reading format; the PDFs are
 an offline convenience.
 """
 
+import base64
+import io
+import re
 from pathlib import Path
 
 import markdown
+import matplotlib
+
+matplotlib.use("Agg")  # no display backend needed -- rendering to PNG only
+import matplotlib.pyplot as plt
 from markdown.extensions.codehilite import CodeHiliteExtension
 from pygments.formatters import HtmlFormatter
 from xhtml2pdf import pisa
@@ -117,7 +124,67 @@ hr {
 ul, ol {
     margin-left: 4px;
 }
+.equation {
+    display: block;
+    margin: 14px auto;
+    max-width: 90%;
+}
 """
+
+_DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)
+_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+
+
+def _render_equation_to_data_uri(latex: str) -> str:
+    """Render one LaTeX expression to a base64-embedded PNG.
+
+    xhtml2pdf has no LaTeX/MathJax support at all -- there is no way to
+    hand it "$$...$$" and get typeset maths out. Matplotlib's mathtext
+    engine renders a useful subset of LaTeX math (fractions, sums,
+    integrals, Greek letters, sub/superscripts -- everything used in
+    this document) to an image with no external LaTeX installation
+    needed, which xhtml2pdf can then place like any other picture.
+    Embedding as a data URI keeps the PDF self-contained -- no separate
+    image files to track alongside it.
+    """
+    fig = plt.figure(figsize=(0.1, 0.1))
+    fig.text(0, 0, f"${latex.strip()}$", fontsize=15, color="#1a1a1a")
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight", transparent=True, pad_inches=0.08)
+    plt.close(fig)
+    buf.seek(0)
+    encoded = base64.b64encode(buf.read()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _render_math(md_text: str) -> str:
+    """Replace "$$...$$" display-math blocks with rendered equation images.
+
+    Only block ("$$") math is handled here, not inline ("$...$") -- this
+    file's shell examples already use single "$" as a prompt character
+    (e.g. "$ command"), and a naive inline-math regex would collide
+    with those. Fenced code blocks are protected from the substitution
+    entirely first, in case one coincidentally contains a "$$"-like
+    sequence.
+    """
+    code_blocks = []
+
+    def _stash_code(match: re.Match) -> str:
+        code_blocks.append(match.group(0))
+        return f"\x00CODEBLOCK{len(code_blocks) - 1}\x00"
+
+    protected = _CODE_BLOCK_RE.sub(_stash_code, md_text)
+
+    def _replace_eq(match: re.Match) -> str:
+        data_uri = _render_equation_to_data_uri(match.group(1))
+        return f'\n\n<p align="center"><img src="{data_uri}" class="equation"></p>\n\n'
+
+    protected = _DISPLAY_MATH_RE.sub(_replace_eq, protected)
+
+    for i, block in enumerate(code_blocks):
+        protected = protected.replace(f"\x00CODEBLOCK{i}\x00", block)
+
+    return protected
 
 # Pygments' own generated CSS for syntax token colours (keywords, strings,
 # comments, decorators, ...) -- generated at build time rather than
@@ -139,6 +206,7 @@ def _codehilite_extension() -> CodeHiliteExtension:
 
 def build_one(source: Path, output: Path) -> None:
     md_text = source.read_text(encoding="utf-8")
+    md_text = _render_math(md_text)
     body_html = markdown.markdown(
         md_text,
         extensions=["fenced_code", "tables", "sane_lists", _codehilite_extension()],
