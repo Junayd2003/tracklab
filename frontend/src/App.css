@@ -20,6 +20,14 @@
   margin: 0;
 }
 
+.description {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 10px 0 0;
+  max-width: 52ch;
+}
+
 /* ---------- Upload panel ---------- */
 
 .upload-panel {

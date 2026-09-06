@@ -153,6 +153,11 @@ export default function App() {
       <header className="app-header">
         <h1>tracklab</h1>
         <p className="tagline">Measured numbers, not guesswork.</p>
+        <p className="description">
+          For music producers who want to know whether a mix will hold up
+          off the studio monitors — on a phone speaker, earbuds, or a club
+          system — before it's too late to fix cheaply.
+        </p>
       </header>
 
       <div className="upload-panel">
