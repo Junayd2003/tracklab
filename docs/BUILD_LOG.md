@@ -1085,6 +1085,17 @@ if a future session starts fresh.
   positioning bug in the PSD formula (`\left|...\right|^2` mis-places
   the trailing exponent) by restructuring it as one full fraction
   instead
+- **Follow-up same session:** equations still rendered far too large
+  relative to body text. Root cause wasn't the chosen font size --
+  rendering at 200 DPI for print sharpness, then placing the image
+  with no explicit width, let the renderer default to treating each
+  pixel as one CSS px (a ~96 DPI assumption), inflating the image to
+  roughly double its intended size regardless of font choice. Fixed by
+  computing the image's true physical width from its actual pixel
+  dimensions (read via Pillow) and the DPI it was rendered at, then
+  setting that explicitly -- not by guessing at a smaller font size.
+  Dropped the font size from 15pt to 12pt at the same time, closer to
+  the 10.5pt body text. `CONCEPTS.pdf` down to 22 pages
 - Full suite still 61/61 (no backend code touched this session)
 
 **Files touched**

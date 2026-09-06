@@ -23,6 +23,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # no display backend needed -- rendering to PNG only
 import matplotlib.pyplot as plt
+from PIL import Image
 from markdown.extensions.codehilite import CodeHiliteExtension
 from pygments.formatters import HtmlFormatter
 from xhtml2pdf import pisa
@@ -127,15 +128,20 @@ ul, ol {
 .equation {
     display: block;
     margin: 14px auto;
-    max-width: 90%;
 }
 """
 
 _DISPLAY_MATH_RE = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)
 _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 
+# Matplotlib fontsize is a physical unit (points, 1/72in) -- chosen close
+# to the body text's own 10.5pt so an equation reads as part of the same
+# document, not a separate, oversized graphic dropped into it.
+_EQUATION_FONTSIZE_PT = 12
+_RENDER_DPI = 200
 
-def _render_equation_to_data_uri(latex: str) -> str:
+
+def _render_equation_to_data_uri(latex: str) -> tuple[str, float]:
     """Render one LaTeX expression to a base64-embedded PNG.
 
     xhtml2pdf has no LaTeX/MathJax support at all -- there is no way to
@@ -146,15 +152,34 @@ def _render_equation_to_data_uri(latex: str) -> str:
     needed, which xhtml2pdf can then place like any other picture.
     Embedding as a data URI keeps the PDF self-contained -- no separate
     image files to track alongside it.
+
+    Returns (data_uri, width_pt) rather than just the image: rendering
+    at a high DPI (for print sharpness) produces an image with many
+    more pixels than its intended physical size, and placing it with
+    no explicit width lets the renderer fall back to treating each
+    pixel as one CSS px (a ~96 DPI assumption) -- inflating a
+    200-DPI image to roughly 200/96, about double its intended size.
+    This was the actual cause of "equations too big," not the chosen
+    font size. Computing the real physical width from the image's
+    pixel dimensions and the DPI it was rendered at, then setting that
+    explicitly, is what makes the display size correct regardless of
+    DPI.
     """
     fig = plt.figure(figsize=(0.1, 0.1))
-    fig.text(0, 0, f"${latex.strip()}$", fontsize=15, color="#1a1a1a")
+    fig.text(0, 0, f"${latex.strip()}$", fontsize=_EQUATION_FONTSIZE_PT, color="#1a1a1a")
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight", transparent=True, pad_inches=0.08)
+    fig.savefig(
+        buf, format="png", dpi=_RENDER_DPI, bbox_inches="tight", transparent=True, pad_inches=0.08
+    )
     plt.close(fig)
     buf.seek(0)
-    encoded = base64.b64encode(buf.read()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
+    png_bytes = buf.read()
+
+    pixel_width, _ = Image.open(io.BytesIO(png_bytes)).size
+    width_pt = (pixel_width / _RENDER_DPI) * 72
+
+    encoded = base64.b64encode(png_bytes).decode("ascii")
+    return f"data:image/png;base64,{encoded}", width_pt
 
 
 def _render_math(md_text: str) -> str:
@@ -176,8 +201,9 @@ def _render_math(md_text: str) -> str:
     protected = _CODE_BLOCK_RE.sub(_stash_code, md_text)
 
     def _replace_eq(match: re.Match) -> str:
-        data_uri = _render_equation_to_data_uri(match.group(1))
-        return f'\n\n<p align="center"><img src="{data_uri}" class="equation"></p>\n\n'
+        data_uri, width_pt = _render_equation_to_data_uri(match.group(1))
+        style = f"width: {width_pt:.1f}pt; max-width: 100%;"
+        return f'\n\n<p align="center"><img src="{data_uri}" class="equation" style="{style}"></p>\n\n'
 
     protected = _DISPLAY_MATH_RE.sub(_replace_eq, protected)
 
