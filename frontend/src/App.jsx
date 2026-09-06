@@ -11,7 +11,7 @@ import {
 import "./App.css";
 import { getTrack, uploadTrack } from "./api";
 
-const POLL_INTERVAL_MS = 1500;
+const POLL_INTERVAL_MS = 400;
 
 const STATUS_LABELS = {
   queued: "Queued",
@@ -113,7 +113,8 @@ export default function App() {
 
   function pollUntilDone(trackId) {
     clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
+
+    async function checkOnce() {
       try {
         const result = await getTrack(trackId);
         setTrack(result);
@@ -124,7 +125,14 @@ export default function App() {
         setError(err.message);
         clearInterval(pollRef.current);
       }
-    }, POLL_INTERVAL_MS);
+    }
+
+    // Check immediately rather than waiting for the first interval tick --
+    // analysis on a typical track finishes in a few seconds, so an
+    // interval-only poll wastes up to POLL_INTERVAL_MS of real analysis
+    // time just sitting idle before the first status check happens.
+    checkOnce();
+    pollRef.current = setInterval(checkOnce, POLL_INTERVAL_MS);
   }
 
   async function handleUpload() {
