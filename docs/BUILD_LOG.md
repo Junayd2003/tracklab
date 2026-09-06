@@ -1130,4 +1130,80 @@ if a future session starts fresh.
 **Next session starts with**
 - Nothing scheduled. The post-freeze catch-up session (theory, syntax,
   code logic, system design) remains the recommended next step
+
+---
+
+## Session 14 — 2026-09-06 — Perceived-latency fix, Firefox networking debug, GitHub hosting
+
+**Done**
+- Investigated "the app seems to take a while to process the
+  analysis": profiled the real pipeline on a 204s track (3.33s total,
+  `detect_bpm`/`detect_key` the two largest steps at ~1s each) and
+  timed a genuinely fresh upload end-to-end (queued -> complete in
+  under 2s). The analysis itself was never the bottleneck.
+- Found the actual cause: `frontend/src/App.jsx`'s polling used
+  `setInterval` only, so the UI waited up to `POLL_INTERVAL_MS` before
+  its first status check and again after the analysis actually
+  finished. Fixed by checking immediately on upload and shortening the
+  interval, 1500ms -> 400ms
+- Debugged a `NetworkError when attempting to fetch resource` reported
+  when opening the app in Firefox for the first time (previously only
+  driven via Chrome/Playwright this project). Traced it to two
+  separate things in sequence: (1) I'd given a `127.0.0.1:5173` link
+  while the backend's CORS `allow_origins` only lists
+  `http://localhost:5173` -- different origins to a browser even
+  though same machine; (2) after correcting to `localhost`, still
+  failed in Firefox specifically -- most likely Firefox's own
+  independent proxy settings (separate from Chrome/macOS system
+  settings) routing localhost traffic through a proxy. Restarting both
+  dev servers cleanly (backend explicitly on `--host 0.0.0.0`, per
+  CLAUDE.md's LAN-reachability requirement; frontend with `--host`)
+  resolved it in practice
+- Created the project's first GitHub remote: `Junayd2003/tracklab`,
+  private. Pushed `main` (all commits to date) and the `v1.0` tag,
+  which existed locally since the Stage 8 session but had never been
+  pushed anywhere before now
+- Confirmed before pushing: `.env`, `tracklab.db`, and `data/` (real
+  audio samples) are all correctly gitignored -- only `.env.example`
+  files are tracked
+
+**Files touched**
+- `frontend/src/App.jsx` — poll immediately on upload, then every
+  400ms instead of 1500ms
+- (vault) `decisions.md` — one new entry, 2026-09-06, on the private
+  GitHub hosting choice
+
+**Decisions**
+- GitHub repo created private, not public, since the post-freeze
+  catch-up session and Tier 2 haven't happened yet (vault
+  `decisions.md`)
+
+**Concepts explained**
+- CORS and browser origins (`127.0.0.1` vs `localhost` as distinct
+  origins despite pointing at the same machine) and browser-level
+  proxy configuration as a source of fetch failures independent of
+  server correctness -- both touched on in passing while debugging,
+  not yet given a proper explained-and-quizzed pass. Deferred to the
+  post-freeze catch-up session along with everything else from
+  Stages 6-8, per the standing pacing agreement -- this session was
+  debugging/deployment, not a stage build, but the same deferral logic
+  applies since the catch-up session hasn't happened yet
+
+**In progress / not finished**
+- Nothing mid-built
+
+**Open questions**
+- None blocking
+
+**Exit criteria met?**
+- N/A -- no stage targeted this session (Tier 1 already frozen at
+  `v1.0`)
+
+**Next session starts with**
+- User has explicitly asked for the dedicated post-freeze session now
+  ("cover basis of all code and logic for me to learn"), to happen
+  another time rather than immediately. When it happens: work through
+  CONCEPTS.md/CODE_GUIDE.md stage by stage with real active-recall
+  checkpoints (the deferred Stage 6-8 quizzing plus this session's
+  CORS/proxy/git concepts), before any Tier 2 planning begins
   whenever the user wants it, before Tier 2 planning in mid-October.
