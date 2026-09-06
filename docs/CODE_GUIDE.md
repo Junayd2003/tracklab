@@ -1095,3 +1095,126 @@ in tests via `TestClient(main.app)`.
   exists — every other status returns `features: null`, which the
   response model's `features: FeaturesResponse | None = None` default
   makes valid rather than a validation error.
+
+---
+
+## Stage 8 — Dashboard and the v1.0 freeze
+
+Theory: [`CONCEPTS.md` § Stage 8](CONCEPTS.md#stage-8--dashboard-and-the-v10-freeze).
+
+### `api.js`
+
+```javascript
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_KEY = import.meta.env.VITE_API_KEY;
+
+const headers = { "X-API-Key": API_KEY };
+
+async function parseOrThrow(response) {
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || `Request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function uploadTrack(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${BASE_URL}/tracks`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  return parseOrThrow(response);
+}
+
+export async function getTrack(id) {
+  const response = await fetch(`${BASE_URL}/tracks/${id}`, { headers });
+  return parseOrThrow(response);
+}
+```
+
+**Algorithm / origin:** the browser's native `fetch` API — no HTTP
+client library needed for two endpoints.
+
+**Purpose here:** the only place the frontend talks to the backend;
+every request carries the shared-secret key.
+
+**Called from:** `App.jsx`.
+
+**Logic:** `import.meta.env.VITE_API_KEY` is Vite's build-time
+substitution — by the time this code runs in a browser, that line has
+literally been replaced with the key's string value baked into the
+bundle (`CONCEPTS.md` explains why that's the correct, deliberate
+choice for this specific key). `parseOrThrow` centralises the
+"turn a failed HTTP response into a thrown JS error" logic once,
+rather than repeating a status check in both `uploadTrack` and
+`getTrack` — a FastAPI error response's JSON body has a `detail` field
+(`HTTPException(status_code=..., detail=...)` on the backend), which
+becomes the thrown error's message here. `FormData` with a File
+appended is what lets `fetch` send a real multipart upload matching
+what FastAPI's `UploadFile` parameter expects on the other end.
+
+---
+
+### `App.jsx` — polling
+
+```javascript
+const pollRef = useRef(null);
+
+useEffect(() => {
+  return () => clearInterval(pollRef.current);
+}, []);
+
+function pollUntilDone(trackId) {
+  clearInterval(pollRef.current);
+  pollRef.current = setInterval(async () => {
+    try {
+      const result = await getTrack(trackId);
+      setTrack(result);
+      if (result.status === "complete" || result.status === "failed") {
+        clearInterval(pollRef.current);
+      }
+    } catch (err) {
+      setError(err.message);
+      clearInterval(pollRef.current);
+    }
+  }, POLL_INTERVAL_MS);
+}
+```
+
+**Algorithm / origin:** client-side polling — the standard pattern for
+"check status periodically" when the server can't push updates itself
+without a different protocol entirely (WebSockets, SSE).
+
+**Purpose here:** the mechanism behind "upload, then watch the status
+update automatically" — no page refresh, no manual re-check.
+
+**Called from:** `handleUpload`, once, right after a successful
+upload whose status isn't already terminal.
+
+**Logic:** `useRef`, not `useState`, holds the interval ID — a ref's
+value persists across renders without *causing* a re-render when it
+changes, which is exactly what an interval ID needs (nothing on screen
+depends on its value, only cleanup code does). The `useEffect` with an
+empty dependency array (`[]`) runs its cleanup exactly once, on
+unmount — clearing whatever interval happens to be running at that
+moment, however it got started. `pollUntilDone` itself also clears any
+existing interval before creating a new one, which is what stops two
+intervals ever running at once if a second upload happens while the
+first is still being polled (`CONCEPTS.md` explains the hazard this
+avoids). Inside the interval callback, both terminal outcomes
+(`"complete"` and `"failed"`) and any thrown error all call
+`clearInterval` — a poll that never explicitly stops itself would keep
+firing forever, long after there's anything new to report.
+
+---
+
+### The freeze
+
+`v1.0` is tagged once this section exists — the exit criterion for
+Stage 8, and for Tier 1 as a whole (`STAGES.md`). Nothing about the
+DSP or the API changes for the tag itself; it's a marker on the commit
+this section was written for.

@@ -1089,9 +1089,78 @@ two separate ones (`decisions.md`, 2026-09-06).
 
 ---
 
+## Stage 8 — Dashboard, README, and the v1.0 freeze
+
+### What we built
+
+`frontend/src/App.jsx`: upload, poll, display — metric cards, a
+frequency-balance bar chart (`recharts`), a mono-compatibility
+indicator. `frontend/src/api.js`: a small `fetch` wrapper attaching the
+shared-secret key. `README.md` rewritten as a technical report with
+real validation figures, not just feature description. Full annotated
+source: [`CODE_GUIDE.md` § Stage 8](CODE_GUIDE.md#stage-8--dashboard-and-the-v10-freeze).
+
+### Polling, and the cleanup problem it creates
+
+`GET /tracks/{id}` has to be polled from the browser, not pushed to
+it — HTTP is client-initiated, the server can't call the browser back
+on its own without a different mechanism entirely (WebSockets, Server-
+Sent Events — neither needed for a personal tool checking status every
+1.5 seconds). `setInterval` inside a React `useEffect` creates a real
+hazard if not handled: if a component unmounts (the user navigates
+away) or a new track supersedes the one being polled, an orphaned
+interval keeps firing, calling `setState` on a component that no
+longer represents that track — at best wasted requests, at worst state
+from the wrong track landing in the UI. `App.jsx` handles this two
+ways: the `useEffect`'s cleanup function (`return () =>
+clearInterval(...)`) runs on unmount, and `pollUntilDone` explicitly
+clears any *existing* interval before starting a new one, so uploading
+a second track while the first is still polling can't leave two
+intervals racing each other.
+
+### Why the shared-secret key is fine in the frontend bundle, and the Claude key never will be
+
+Worth being precise about, since both are ".env values used by
+frontend or backend code" and it would be easy to conflate them. Vite
+only exposes environment variables prefixed `VITE_` to client code —
+a deliberate default specifically to stop a real secret in a `.env`
+file leaking into the built JS bundle by accident. `VITE_API_KEY`
+uses that mechanism deliberately, because the frontend is the
+*legitimate* holder of this particular key: it exists only to keep
+casual, unauthorised devices off this LAN-only tool
+(`decisions.md`, 2026-08-23), and the frontend needs to present it on
+every request, the same as any other legitimate client would. The
+Claude API key (Tier 2, not yet built) is a categorically different
+thing — a real, billable secret — and `CLAUDE.md` is explicit that it
+must never reach frontend code at all, under any circumstance. Same
+`.env` mechanism, opposite treatment, because the two keys protect
+against entirely different threats.
+
+### Confirming real client-server behaviour, not just `TestClient`
+
+Every prior stage's HTTP-adjacent behaviour was validated through
+FastAPI's `TestClient` — the correct, idiomatic way to test a FastAPI
+app, but it never opens a real network socket. Stage 8 is the first
+point where a genuinely different client (a browser, sending real CORS
+preflight-adjacent headers) talks to a real, separately-running server
+process. That was checked directly rather than assumed: a real
+`uvicorn` process, hit with `curl` carrying an `Origin` header, correctly
+returned `access-control-allow-origin: http://localhost:5173` — proof
+the CORS configuration works against actual HTTP, not just through
+Starlette's in-process test transport.
+
+### References
+
+- [Vite: Env Variables and Modes](https://vite.dev/guide/env-and-mode) — the `VITE_` prefix convention and why it exists
+- [React: Synchronizing with Effects](https://react.dev/learn/synchronizing-with-effects) — the `useEffect` cleanup pattern, including the exact orphaned-interval problem this stage's polling code avoids
+
+---
+
 ## What's next
 
-Stage 8 (minimal dashboard, README rewritten as a technical report,
-freeze and `v1.0` tag) will get its own section here once it exists.
-Not written yet, on purpose — this document tracks the code, it
-doesn't get ahead of it.
+Tier 1 is frozen as of this stage (`v1.0`). Tier 2 work — genre
+classification, the Claude feedback layer, and the rest — is paced for
+October–December 2026 (`BUILD_LOG.md`, 2026-08-29) and will get its own
+sections here once that work actually begins, under the same rule as
+every stage above: this document tracks the code, it doesn't get ahead
+of it.

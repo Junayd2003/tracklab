@@ -1,0 +1,40 @@
+/* Dark by default, not conditional on system preference -- spec.md:
+   "producers work in dark rooms and every DAW is dark." */
+:root {
+  --bg: #14151a;
+  --panel: #1c1e26;
+  --border: #2c2f3a;
+  --text: #e2e4e9;
+  --text-dim: #9095a3;
+  --mono: "SF Mono", "Menlo", "Courier New", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+
+  color-scheme: dark;
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+h1, h2, h3 {
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+/* Every numeric readout uses the monospace stack -- spec.md. */
+.numeric {
+  font-family: var(--mono);
+}

@@ -954,3 +954,87 @@ if a future session starts fresh.
 - Stage 8: minimal dashboard (Vite React), README rewritten as a
   technical report, test suite runnable in one command, freeze and
   tag `v1.0`. Last stage before the 28 September deadline.
+
+---
+
+## Session 12 — 2026-09-06 — Stage 8: Dashboard, README, v1.0 freeze
+
+**Done**
+- Scaffolded `frontend/` (Vite + React 19, `recharts` for the
+  frequency-balance chart). Removed the default demo scaffold content
+  (marketing CSS, unused assets)
+- `frontend/src/api.js`: a small `fetch` wrapper attaching the
+  shared-secret key to every request. `frontend/src/App.jsx`: upload,
+  poll (`setInterval` inside `useEffect`, with cleanup to prevent
+  orphaned intervals), metric cards, a `recharts` frequency-balance bar
+  chart, a colour-coded mono-compatibility indicator
+- Dark-by-default theme, monospace numeric readouts, single-column
+  under 640px -- per `spec.md`'s stated frontend requirements
+- Confirmed the frontend's shared-secret key can safely be embedded in
+  the built JS bundle (Vite's `VITE_` prefix convention), explicitly
+  distinguishing this from the Claude API key, which must never reach
+  frontend code under any circumstance -- same `.env` mechanism,
+  opposite treatment, because the two keys protect against different
+  threats
+- Verified real client-server behaviour directly, not just via
+  `TestClient`: ran an actual `uvicorn` process and hit it with `curl`
+  carrying a real `Origin` header, confirming the CORS configuration
+  works against genuine HTTP, not only Starlette's in-process test
+  transport. Needed the sandbox restriction lifted for this one check
+  (network access, not filesystem) -- kept fully local, nothing
+  destructive or external
+- `README.md` rewritten as a technical report: the problem, an
+  architecture diagram (Mermaid, renders natively on GitHub), the
+  mathematics behind Welch/LUFS/mono-phase with their actual validation
+  figures (cross-checked against `CONCEPTS.md` before writing, not
+  approximated from memory -- caught and fixed one invented number in
+  the process), setup instructions, honest known limitations
+- `docs/STAGES.md`: corrected the stale `dynamic_range` mention in
+  Stage 8's own "Produces" list (never implemented, same 2026-08-22
+  rescope correction as `spec.md`'s data model) while marking it done
+- `docs/CONCEPTS.md` and `docs/CODE_GUIDE.md` Stage 8 sections written;
+  PDFs regenerated
+
+**Files touched**
+- `frontend/` — new (Vite React app)
+- `.env.example`, `frontend/.env.example` — env var shapes for a
+  stranger to follow
+- `README.md` — fully rewritten
+- `docs/STAGES.md` — Stage 8 marked done, stale mention corrected
+- `docs/CONCEPTS.md`, `docs/CODE_GUIDE.md` — Stage 8 sections added
+- (vault) `decisions.md` — one new entry, 2026-09-06
+
+**Decisions**
+- Shared-secret key deliberately embedded in the frontend bundle,
+  explicitly distinguished from the Claude key's permanent ban from
+  frontend code (vault `decisions.md`)
+
+**Concepts explained**
+- Why polling needs `useEffect` cleanup to avoid orphaned intervals;
+  the `VITE_` prefix convention and why one key gets embedded while
+  another never will (both in `CONCEPTS.md` -- not quizzed live, per
+  the Stage 6-8 pacing note, which has now run its course)
+
+**In progress / not finished**
+- Nothing mid-built. Stage 8 is complete. Tier 1 is functionally done;
+  the `v1.0` tag itself is the one remaining action, confirmed with the
+  user before creating it (a genuine milestone, not a routine commit)
+
+**Open questions**
+- None blocking.
+
+**Exit criteria met?**
+- Yes, with one honest exception: "CI green" was never achieved
+  literally, since no GitHub remote exists for this repo (deferred
+  since Stage 1, by explicit choice each time it came up). Met as "the
+  test suite passes locally, in one command," not "in a CI pipeline."
+  Everything else: a stranger can clone, install, run, and read a
+  README explaining not just what the tool does but why each
+  measurement is correct, with real figures shown.
+
+**Next session starts with**
+- Nothing, until the user chooses to resume. Per the pacing agreement
+  (2026-09-05), a dedicated post-freeze session should properly cover
+  theory, syntax, code logic, and system design across everything
+  built during the Stage 6-8 stretch, before Tier 2 planning begins in
+  mid-October.

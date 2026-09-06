@@ -1,0 +1,123 @@
+.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.upload-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.upload-panel button {
+  background: var(--text);
+  color: var(--bg);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.upload-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status-line {
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+
+.error-line {
+  color: var(--bad);
+  font-family: var(--mono);
+}
+
+/* Metric cards: single column under 640px, otherwise a grid --
+   spec.md's stated responsive breakpoints. */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 640px) {
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.metric-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.metric-card .label {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.metric-card .value {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.panel h2 {
+  font-size: 16px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Colour signals whether a value is in range -- spec.md: "not for
+   decoration." Thresholds match mono_compatibility()'s 0-100 score. */
+.mono-indicator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mono-indicator .dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mono-indicator .dot.ok { background: var(--ok); }
+.mono-indicator .dot.warn { background: var(--warn); }
+.mono-indicator .dot.bad { background: var(--bad); }
+
+.mono-indicator .score {
+  font-family: var(--mono);
+  font-size: 20px;
+}
+
+.mono-indicator .worst-band {
+  color: var(--text-dim);
+  font-size: 13px;
+}

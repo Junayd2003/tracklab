@@ -274,22 +274,29 @@ literally, only "passing locally."
 ### Stage 8 — Minimal dashboard, README, freeze
 
 **Produces**
-- Vite React app: metric cards (BPM, key, LUFS, dynamic range, mono
-  score), frequency balance chart, mono compatibility indicator — no
-  polish beyond what's needed to show the numbers clearly
+- Vite React app: metric cards (BPM, key, loudness), frequency balance
+  chart, mono compatibility indicator — no `dynamic_range` card (never
+  implemented, cut in the 2026-08-22 rescope, same correction as
+  `spec.md`'s data model) — no polish beyond what's needed to show the
+  numbers clearly
 - `README.md` rewritten as a short technical report: the problem,
   architecture, and — specifically — the mathematics behind Welch,
   LUFS, and mono/phase, with their validation results shown, not just
   what the tool does
 - `.env.example`, setup instructions a stranger could actually follow
-- Test suite runnable in one command, CI green
+- Test suite runnable in one command
 - Git tag `v1.0`
 
 **Exit criteria**
-A stranger can clone the repo, run the test suite, run the app, and
-read a README that explains not just what the tool measures but why
-each measurement is correct. Tag `v1.0` and freeze the repository —
-**28 September is a hard stop**, regardless of what remains unbuilt.
+*(Done, 2026-09-06.)* A stranger can clone the repo, run the test suite
+in one command, run the app (backend + frontend), and read a README
+that explains not just what the tool measures but why each measurement
+is correct, with real validation figures shown. "CI green" from the
+Produces list above was not achieved literally — no GitHub remote
+exists for this repo (Stage 1's open item, left deferred throughout) —
+so this is met as "the suite passes locally," not "in CI." Tag `v1.0`
+and freeze the repository — **28 September is a hard stop**; this
+lands 22 days early.
 
 ---
 
