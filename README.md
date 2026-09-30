@@ -8,9 +8,8 @@ I produce electronic music. The recurring problem this solves: a mix
 that sounds right on studio monitors can fall apart elsewhere, and
 there's no way to know which until it's too late to fix cheaply.
 tracklab measures the specific things that cause that, phase
-cancellation on mono playback, loudness relative to streaming targets,
-frequency balance against a reference you choose, and shows the
-numbers, not a verdict.
+cancellation on mono playback, integrated loudness (LUFS), frequency
+balance across five bands, and shows the numbers, not a verdict.
 
 ## What it measures
 
@@ -24,9 +23,10 @@ numbers, not a verdict.
 Frequency balance is deliberately *not* compared against invented
 "genre reference curves", there's no rigorous published standard for
 that, and fabricating one would have broken the honesty standard the
-rest of this project holds itself to. Instead, the same frequency-
-balance function runs on any track you designate as a reference, and
-the dashboard plots both.
+rest of this project holds itself to. A reference is just the same
+frequency-balance function run on a track you choose yourself. The
+dashboard currently shows one track at a time; plotting a reference
+alongside it is not built yet.
 
 ## Architecture
 
@@ -58,9 +58,10 @@ the project. This layering is why every DSP module could be tested
 with a few lines of synthetic NumPy data and no server, database, or
 real audio file, see `docs/CODE_GUIDE.md` for the full reasoning.
 
-Deeper theory, cited against primary sources: `docs/CONCEPTS.md` /
-`docs/CONCEPTS.pdf`. The same stages, via annotated real source code:
-`docs/CODE_GUIDE.md` / `docs/CODE_GUIDE.pdf`.
+Deeper theory, cited against primary sources: `docs/CONCEPTS.md`. The
+same stages, via annotated real source code: `docs/CODE_GUIDE.md`. PDF
+versions of both are built locally by `docs/build_pdf.py` and are not
+committed.
 
 ## The mathematics, briefly, with validation results
 
@@ -173,9 +174,12 @@ background — status updates automatically until it completes.
 backend/.venv/bin/python -m pytest tests/
 ```
 
-One command, no personal data required — every test uses synthetically
+One command, no personal data required — the tests use synthetically
 generated audio, not the personal tracks used for manual validation
-during development (`data/samples/`, gitignored, never committed).
+during development (`data/samples/`, gitignored, never committed). Two
+tests skip themselves when their input is missing: one full-pipeline
+test that needs a personal sample track, and one loudness test that
+needs ffmpeg on the PATH.
 
 ## Known limitations
 
@@ -185,8 +189,7 @@ during development (`data/samples/`, gitignored, never committed).
 - M4A decoding was never tested against a real file, no M4A sample
   was available during development; WAV and MP3 are both verified.
 - No CI pipeline yet — the test suite passes locally but doesn't run
-  automatically on push (no GitHub remote was set up during this
-  project's timeline).
+  automatically on push.
 - The shared-secret API key is a proportionate gate for a single-user,
   LAN-exposed tool, not real authentication — don't expose this beyond
   a home network.
