@@ -22,7 +22,7 @@ numbers, not a verdict.
 | BPM and key | `librosa` — deliberately a library call, not validated from scratch (see [Why some of this is from scratch and some isn't](#why-some-of-this-is-from-scratch-and-some-isnt)) |
 
 Frequency balance is deliberately *not* compared against invented
-"genre reference curves" — there's no rigorous published standard for
+"genre reference curves", there's no rigorous published standard for
 that, and fabricating one would have broken the honesty standard the
 rest of this project holds itself to. Instead, the same frequency-
 balance function runs on any track you designate as a reference, and
@@ -56,7 +56,7 @@ on disk exists. `backend/pipeline.py` is the only thing that calls all
 of them together. `backend/main.py` is the only HTTP-facing code in
 the project. This layering is why every DSP module could be tested
 with a few lines of synthetic NumPy data and no server, database, or
-real audio file — see `docs/CODE_GUIDE.md` for the full reasoning.
+real audio file, see `docs/CODE_GUIDE.md` for the full reasoning.
 
 Full stage-by-stage build history: `docs/BUILD_LOG.md`. Deeper theory,
 cited against primary sources: `docs/CONCEPTS.md` /
@@ -68,14 +68,13 @@ cited against primary sources: `docs/CONCEPTS.md` /
 ### Frequency balance — Welch's method
 
 A single periodogram (`|FFT|²`) is a statistically noisy estimate of a
-signal's power spectral density — more data sharpens frequency
+signal's power spectral density, more data sharpens frequency
 resolution, not the estimate's reliability. Welch (1967) fixed this by
 segmenting the signal, windowing each segment, computing a periodogram
 per segment, and averaging, trading resolution for reduced variance.
 
 Implemented from scratch in `backend/audio/spectral.py`, including the
-periodic (not symmetric) Hann window FFT-based analysis actually needs
-— a distinction that surfaced as a real, measured bug during
+periodic (not symmetric) Hann window FFT-based analysis actually needs, a distinction that surfaced as a real, measured bug during
 development (`~2×10⁻⁴` relative error, traced to the wrong window
 variant) before being fixed. Validated against `scipy.signal.welch` on
 synthetic sine waves and white noise: **`rtol=1e-9`**, effectively
