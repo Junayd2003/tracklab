@@ -29,6 +29,9 @@ docs/.venv/
 docs/CONCEPTS.pdf
 docs/CODE_GUIDE.pdf
 
+# Build log — private session journal, kept locally only
+docs/BUILD_LOG.md
+
 # OS / editor
 .DS_Store
 .vscode/
