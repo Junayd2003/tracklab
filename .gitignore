@@ -29,8 +29,10 @@ docs/.venv/
 docs/CONCEPTS.pdf
 docs/CODE_GUIDE.pdf
 
-# Build log — private session journal, kept locally only
+# Private working files — session journal and assistant instructions,
+# kept locally only
 docs/BUILD_LOG.md
+CLAUDE.md
 
 # OS / editor
 .DS_Store
