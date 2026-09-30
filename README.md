@@ -4,7 +4,7 @@ A local-first tool that measures whether a music mix will translate,
 whether it holds up on a phone speaker, laptop speakers, earbuds, or a
 club system, using measured numbers instead of guesswork.
 
-I produce electronic music. The recurring problem this solves: a mix
+I produce multiple genres of music. The recurring problem this solves: a mix
 that sounds right on studio monitors can fall apart elsewhere, and
 there's no way to know which until it's too late to fix cheaply.
 tracklab measures the specific things that cause that, phase
