@@ -1,15 +1,15 @@
 # tracklab
 
-A local-first tool that measures whether a music mix will translate —
+A local-first tool that measures whether a music mix will translate,
 whether it holds up on a phone speaker, laptop speakers, earbuds, or a
-club system — using measured numbers instead of guesswork.
+club system, using measured numbers instead of guesswork.
 
 I produce electronic music. The recurring problem this solves: a mix
 that sounds right on studio monitors can fall apart elsewhere, and
 there's no way to know which until it's too late to fix cheaply.
-tracklab measures the specific things that cause that — phase
+tracklab measures the specific things that cause that, phase
 cancellation on mono playback, loudness relative to streaming targets,
-frequency balance against a reference you choose — and shows the
+frequency balance against a reference you choose, and shows the
 numbers, not a verdict.
 
 ## What it measures
@@ -71,7 +71,7 @@ A single periodogram (`|FFT|²`) is a statistically noisy estimate of a
 signal's power spectral density — more data sharpens frequency
 resolution, not the estimate's reliability. Welch (1967) fixed this by
 segmenting the signal, windowing each segment, computing a periodogram
-per segment, and averaging — trading resolution for reduced variance.
+per segment, and averaging, trading resolution for reduced variance.
 
 Implemented from scratch in `backend/audio/spectral.py`, including the
 periodic (not symmetric) Hann window FFT-based analysis actually needs
@@ -116,7 +116,7 @@ energy loss in the corresponding band matches the prediction.
 **Validated to within 1%** across three tested phase differences.
 Two real bugs were caught this way during development — spectral
 leakage producing a false "worst band," and an unweighted score
-diluting a fully-cancelled signal's severity — both documented in full
+diluting a fully-cancelled signal's severity, both documented in full
 in `docs/CONCEPTS.md`.
 
 ### Why some of this is from scratch and some isn't
@@ -182,9 +182,9 @@ during development (`data/samples/`, gitignored, never committed).
 ## Known limitations
 
 - BPM and key detection are library calls with known, expected failure
-  modes (above) — not bugs, but worth knowing about before trusting a
+  modes (above), not bugs, but worth knowing about before trusting a
   reported key or tempo at face value.
-- M4A decoding was never tested against a real file — no M4A sample
+- M4A decoding was never tested against a real file, no M4A sample
   was available during development; WAV and MP3 are both verified.
 - No CI pipeline yet — the test suite passes locally but doesn't run
   automatically on push (no GitHub remote was set up during this
